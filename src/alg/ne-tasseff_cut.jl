@@ -265,9 +265,6 @@ function add_tasseff_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
                     gt_cut_lhs += JuMP.dual(mccormick_2[a][r]) * (dh_ub * x_r_a + h_i_res - dh_ub)
                     gt_cut_lhs += JuMP.dual(mccormick_3[a][r]) * (dh_ub * x_r_a)
                     gt_cut_lhs += JuMP.dual(mccormick_4[a][r]) * (dh_lb * x_r_a + h_i_res - dh_lb)
-
-                    #gt_cut_lhs -= JuMP.dual(diff_p_definition[a][r]) * inv(L) * x_sel * h_i_res
-                    #gt_cut_lhs += JuMP.dual(diff_n_definition[a][r]) * inv(L) * x_sel * h_i_res
                 else
                     dh_ub = JuMP.upper_bound(wm.var[:nw][n][:h][i]) - JuMP.lower_bound(wm.var[:nw][n][:h][j])
                     dh_lb = JuMP.lower_bound(wm.var[:nw][n][:h][i]) - JuMP.upper_bound(wm.var[:nw][n][:h][j])
