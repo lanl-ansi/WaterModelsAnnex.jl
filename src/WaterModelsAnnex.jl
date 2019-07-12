@@ -6,6 +6,10 @@ import JuMP
 import Memento
 using WaterModels
 
+import MathOptInterface
+const MOI = MathOptInterface
+const MOIU = MathOptInterface.Utilities
+
 const LOGGER = Memento.getlogger(WaterModels)
 
 const WMs = WaterModels
@@ -22,11 +26,11 @@ function silence()
     Memento.setlevel!(Memento.getlogger(WaterModels), "error")
 end
 
-include("alg/ne-no_good.jl")
-#include("alg/ne-repair_solution.jl")
-#include("alg/ne-find_initial_solution.jl")
-#include("alg/ne-benders.jl")
-#include("alg/ne-raghunathan.jl")
-#include("alg/ne-tasseff.jl")
+include("alg/ne-add_tasseff.jl")
+include("alg/ne-global.jl")
+include("alg/ne-no_good_cut.jl")
+include("alg/ne-tasseff_cut.jl")
+include("util/check_physical_solution.jl")
+include("util/get_physical_solution.jl")
 
 end
