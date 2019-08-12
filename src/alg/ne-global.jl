@@ -9,11 +9,10 @@ function ne_global(network_path::String, modifications_path::String,
                    geojson_path::String)
     # Read in the original network data.
     network = WMs.parse_file(network_path)
-    alpha = network["options"]["headloss"] == "h-w" ? 1.852 : 2.0
 
     # Construct the CP feasibility model.
-    wf = WMs.build_generic_model(network, WMs.NCNLPWaterModel, WMs.get_post_wf(alpha))
-    wf_result = WaterModels.run_wf(network, NCNLPWaterModel, nlp_optimizer, alpha=alpha)
+    wf = WMs.build_generic_model(network, WMs.NCNLPWaterModel, WMs.post_wf)
+    wf_result = WaterModels.run_wf(network, NCNLPWaterModel, nlp_optimizer)
 
     # Add the modifications to the network data and construct the MILPR model.
     modifications = WMs.parse_file(modifications_path)
@@ -30,8 +29,7 @@ function ne_global(network_path::String, modifications_path::String,
     WMs.set_start_resistance_ne!(network)
 
     # Build the relaxed network expansion problem.
-    post_ne = WMs.get_post_ne(alpha)
-    ne = WMs.build_generic_model(network, WMs.MILPRWaterModel, post_ne)
+    ne = WMs.build_generic_model(network, WMs.MILPRWaterModel, WMs.post_ne)
 
     max_iterations = 10
     iteration_counter = 0
@@ -57,7 +55,8 @@ function ne_global(network_path::String, modifications_path::String,
         infeasible_nodes = sort(collect(Set(vcat(collect(keys(hlb_false)), collect(keys(hub_false))))))
 
         if !design_is_feasible
-            add_feasibility_cut!(ne, mip_optimizer)
+            #add_feasibility_cut!(ne, mip_optimizer)
+            add_feasibility_cut!(ne, mip_optimizer, q, h)
 
             #if geojson_path != ""
             #    InfrastructureModels.update_data!(ne.data, ne_solution["solution"])
