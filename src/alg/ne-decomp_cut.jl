@@ -51,14 +51,14 @@ function add_decomp_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactory
     node_list = collect(keys(filter(d -> !d.second, hlb)))
     node_list = vcat(node_list, collect(keys(filter(d -> !d.second, hub))))
 
-    for i in node_list
+    for i in Set(node_list)
         add_upstream_cut!(wm, graph, q, resistance_indices, i, n)
     end
 
     arc_list = collect(keys(filter(d -> !d.second, qlb)))
     arc_list = vcat(arc_list, collect(keys(filter(d -> !d.second, qub))))
 
-    for a in arc_list
+    for a in Set(arc_list)
         i = WMs.ref(wm, n, :links, a)["node_fr"]
         j = WMs.ref(wm, n, :links, a)["node_to"]
 
