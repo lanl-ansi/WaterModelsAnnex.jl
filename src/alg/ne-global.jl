@@ -55,8 +55,7 @@ function ne_global(network_path::String, modifications_path::String,
         infeasible_nodes = sort(collect(Set(vcat(collect(keys(hlb_false)), collect(keys(hub_false))))))
 
         if !design_is_feasible
-            #add_feasibility_cut!(ne, mip_optimizer)
-            add_feasibility_cut!(ne, mip_optimizer, q, h)
+            add_feasibility_cut!(ne, nlp_optimizer)
 
             #if geojson_path != ""
             #    InfrastructureModels.update_data!(ne.data, ne_solution["solution"])

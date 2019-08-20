@@ -28,6 +28,7 @@ end
 
 include("alg/ne-add_tasseff.jl")
 include("alg/ne-global.jl")
+include("alg/ne-decomp_cut.jl")
 include("alg/ne-no_good_cut.jl")
 include("alg/ne-tasseff_cut.jl")
 include("util/check_physical_solution.jl")
