@@ -1,4 +1,3 @@
-#function add_no_good_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactory, q_sol::Dict{Int, Float64}, h_sol::Dict{Int, Float64}, n::Int=wm.cnw)
 function add_no_good_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactory, n::Int=wm.cnw)
     xr_ones = Array{JuMP.VariableRef, 1}()
     xr_zeros = Array{JuMP.VariableRef, 1}()

@@ -56,29 +56,6 @@ function ne_global(network_path::String, modifications_path::String,
 
         if !design_is_feasible
             add_feasibility_cut!(ne, nlp_optimizer)
-
-            #if geojson_path != ""
-            #    InfrastructureModels.update_data!(ne.data, ne_solution["solution"])
-            #    features = WaterModels.export_geojson(ne.data)["features"]
-            #    for feature in features
-            #        feature["properties"]["iteration"] = iteration_counter
-            #        feature["properties"]["feasible"] = true
-
-            #        if feature["geometry"]["type"] == "LineString" && feature["properties"]["id"] in infeasible_arcs
-            #            feature["properties"]["feasible"] = false
-            #        elseif feature["geometry"]["type"] == "Point" && feature["properties"]["id"] in infeasible_nodes
-            #            feature["properties"]["feasible"] = false
-            #        end
-            #    end
-
-            #    all_features = vcat(all_features, features)
-
-            #    # Write out the feature dictionary.
-            #    feature_dict = Dict("type" => "FeatureCollection", "features" => all_features)
-            #    open(geojson_path, "w") do f
-            #        JSON.print(f, feature_dict, 4)
-            #    end
-            #end
         end
 
         println(iteration_counter, ",", objective_value)
