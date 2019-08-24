@@ -30,7 +30,7 @@ function ne_global(network_path::String, modifications_path::String,
     # Build the relaxed network expansion problem.
     ne = WMs.build_generic_model(network, WMs.MILPRWaterModel, WMs.post_ne)
 
-    max_iterations = 10
+    max_iterations = 25
     iteration_counter = 0
     design_is_feasible = false
     all_features = []

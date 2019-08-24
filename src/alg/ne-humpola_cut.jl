@@ -23,45 +23,26 @@ end
 
 function compute_zeta(wm::GenericWaterModel, q::Dict{Int, Float64},
     mu_e::Dict{Int, Float64}, h::Dict{Int, Float64}, mu_v::Dict{Int, Float64},
-    lambda_e_p::Dict{Int, Float64}, lambda_e_n::Dict{Int, Float64}, n::Int=wm.cnw)
+    lambda_e_p::Dict{Int, Float64}, lambda_e_n::Dict{Int, Float64},
+    optimizer::JuMP.OptimizerFactory, n::Int=wm.cnw)
+    model = JuMP.Model(with_optimizer(optimizer))
+    zeta = JuMP.@variable(model, base_name="zeta", lower_bound=0.0, upper_bound=1.0)
 
-    converged = false
-    zeta_m1 = 0.0
-    zeta = 0.0
-
-    while !converged
-        zeta_m1 = zeta
-
-        for a in keys(q)
+    for a in keys(q)
+        if mu_e[a] * q[a] > 0.0
+            JuMP.@constraint(model, zeta * abs(q[a]) >= (1 - zeta) * abs(mu_e[a]))
+        elseif mu_e[a] * q[a] < 0.0
             i = WMs.ref(wm, n, :links, a)["node_fr"]
             j = WMs.ref(wm, n, :links, a)["node_to"]
-
-            if mu_e[a] * q[a] > 0.0
-                if !(zeta * abs(q[a]) > (1 - zeta) * abs(mu_e[a]))
-                    zeta += 1.0e-6
-                    break
-                end
-            end
-
-            if mu_e[a] * q[a] < 0.0
-                if !((1 - zeta) * abs(mu_v[i] - mu_v[j] - lambda_e_p[a] + lambda_e_n[a]) < zeta * abs(mu_v[i] - mu_v[j]))
-                    zeta += 1.0e-6
-                    break
-                end
-            end
-
-            if mu_e[a] * q[a] == 0.0
-                zeta = 1.0
-                break
-            end
-        end
-
-        if isapprox(zeta, zeta_m1)
-            converged = true
+            JuMP.@constraint(model, (1 - zeta) * abs(mu_v[i] - mu_v[j] - lambda_e_p[a] + lambda_e_n[a]) <= zeta * abs(mu_v[i] - mu_v[j]))
+        else
+            JuMP.@constraint(model, (1 - zeta) * mu_e[a] == 0.0)
         end
     end
 
-    return zeta
+    JuMP.@objective(model, MOI.MIN_SENSE, zeta)
+    JuMP.optimize!(model)
+    return JuMP.objective_value(model)
 end
 
 function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactory, n::Int=wm.cnw)
@@ -140,9 +121,7 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
     qr = Dict{Int, Float64}(i => JuMP.value(qr[i]) for i in ids(wm, n, :reservoirs))
     Delta_v = Dict{Int, Float64}(i => JuMP.value(Delta_v[i]) for i in h_ids)
     Delta_e = Dict{Int, Float64}(a => JuMP.value(Delta_e[a]) for a in q_ids)
-
-    # TODO: Find a way to calculate this.
-    zeta = compute_zeta(wm, q, mu_e, h, mu_v, lambda_e_p, lambda_e_n, n)
+    zeta = compute_zeta(wm, q, mu_e, h, mu_v, lambda_e_p, lambda_e_n, optimizer, n)
 
     lhs = JuMP.AffExpr(0.0)
     rhs = JuMP.AffExpr(0.0)
@@ -168,12 +147,11 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
             q_ub = JuMP.upper_bound(WMs.var(wm, n, :qp_ne, a)[r_id])
             q_lb = -JuMP.upper_bound(WMs.var(wm, n, :qn_ne, a)[r_id])
 
-            q_sol = q[a] #r_id == resistance_indices[a] ? q[a] : 0.0
             mu_e_sol = r_id == resistance_indices[a] ? mu_e[a] : 0.0
             lambda_e_p_sol = r_id == resistance_indices[a] ? lambda_e_p[a] : 0.0
             lambda_e_n_sol = r_id == resistance_indices[a] ? lambda_e_n[a] : 0.0
 
-            tau = compute_tau(wm, q_sol, mu_e_sol, h, mu_v, lambda_e_p_sol, lambda_e_n_sol, zeta, a, optimizer, res, q_lb, q_ub, n)
+            tau = compute_tau(wm, q[a], mu_e_sol, h, mu_v, lambda_e_p_sol, lambda_e_n_sol, zeta, a, optimizer, res, q_lb, q_ub, n)
             lhs += tau * var(wm, n, :x_res, a)[r_id]
 
             if r_id == resistance_indices[a]
@@ -183,5 +161,5 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
         end
     end
 
-    c = JuMP.@constraint(wm.model, lhs <= rhs)
+    JuMP.@constraint(wm.model, lhs <= rhs)
 end
