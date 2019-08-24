@@ -133,12 +133,6 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
     lambda_e_n = Dict{Int, Float64}(a => max(0, JuMP.dual(c)) for (a, c) in flow_lb)
     lambda_e = Dict{Int, Float64}(a => max(0, JuMP.dual(JuMP.LowerBoundRef(Delta_e[a]))) for a in q_ids)
 
-    #lambda_v_n = Dict{Int, Float64}(i => JuMP.dual(c) for (i, c) in head_lb)
-    #lambda_v = Dict{Int, Float64}(i => JuMP.dual(JuMP.LowerBoundRef(Delta_v[i])) for i in h_ids)
-    #lambda_e_p = Dict{Int, Float64}(a => -JuMP.dual(c) for (a, c) in flow_ub)
-    #lambda_e_n = Dict{Int, Float64}(a => JuMP.dual(c) for (a, c) in flow_lb)
-    #lambda_e = Dict{Int, Float64}(a => JuMP.dual(JuMP.LowerBoundRef(Delta_e[a])) for a in q_ids)
-
     mu_v = Dict{Int, Float64}(i => JuMP.dual(c) for (i, c) in conservation)
     mu_e = Dict{Int, Float64}(a => -JuMP.dual(c) for (a, c) in loss)
     h = Dict{Int, Float64}(i => JuMP.value(h[i]) for i in h_ids)
@@ -147,37 +141,11 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
     Delta_v = Dict{Int, Float64}(i => JuMP.value(Delta_v[i]) for i in h_ids)
     Delta_e = Dict{Int, Float64}(a => JuMP.value(Delta_e[a]) for a in q_ids)
 
-    #lhs = 0.0
-    #rhs = 0.0
-
-    #for a in q_ids
-    #    r_id = resistance_indices[a]
-    #    L = WMs.ref(wm, n, :links, a)["length"]
-    #    res = WMs.ref(wm, n, :resistance, a)[r_id]
-    #    lhs += mu_e[a] * L * res * WMs.f_alpha(alpha, convex=false)(q[a])
-    #    println(a, " ", mu_e[a])
-    #end
-
-    #for i in h_ids
-    #    rhs += (lambda_v_p[i] - lambda_v_n[i]) * h[i]
-    #end
-
-
-    #println(lhs, " ", rhs)
-
-    #println(mu_v)
-    #println(mu_e)
-
-    #println(qr)
-
     # TODO: Find a way to calculate this.
     zeta = compute_zeta(wm, q, mu_e, h, mu_v, lambda_e_p, lambda_e_n, n)
-    #println(zeta)
 
     lhs = JuMP.AffExpr(0.0)
     rhs = JuMP.AffExpr(0.0)
-    lhs_d = 0.0
-    rhs_d = 0.0
 
     rhs -= zeta * sum(h[i] * -junc["demand"] for (i, junc) in ref(wm, n, :junctions))
     rhs -= zeta * sum(h[i] * qr[i] for (i, res) in ref(wm, n, :reservoirs))
@@ -185,13 +153,6 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
     rhs -= (1 - zeta) * sum(mu_v[i] * qr[i] for (i, res) in ref(wm, n, :reservoirs))
     rhs += (1 - zeta) * sum(lambda_v_p[i] * JuMP.upper_bound(WMs.var(wm, n, :h, i)) for i in h_ids)
     rhs -= (1 - zeta) * sum(lambda_v_n[i] * JuMP.lower_bound(WMs.var(wm, n, :h, i)) for i in h_ids)
-
-    #rhs_d += zeta * sum(h[i] * junc["demand"] for (i, junc) in ref(wm, n, :junctions))
-    #rhs_d -= zeta * sum(h[i] * qr[i] for (i, res) in ref(wm, n, :reservoirs))
-    #rhs_d += (1 - zeta) * sum(mu_v[i] * junc["demand"] for (i, junc) in ref(wm, n, :junctions))
-    #rhs_d -= (1 - zeta) * sum(mu_v[i] * qr[i] for (i, res) in ref(wm, n, :reservoirs))
-    #rhs_d += (1 - zeta) * sum(lambda_v_p[i] * JuMP.upper_bound(WMs.var(wm, n, :h, i)) for i in h_ids)
-    #rhs_d -= (1 - zeta) * sum(lambda_v_n[i] * JuMP.lower_bound(WMs.var(wm, n, :h, i)) for i in h_ids)
 
     for a in q_ids
         for (r_id, r) in enumerate(ref(wm, n, :resistance, a))
@@ -213,48 +174,14 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
             lambda_e_n_sol = r_id == resistance_indices[a] ? lambda_e_n[a] : 0.0
 
             tau = compute_tau(wm, q_sol, mu_e_sol, h, mu_v, lambda_e_p_sol, lambda_e_n_sol, zeta, a, optimizer, res, q_lb, q_ub, n)
-
-            #if r_id == resistance_indices[a]
-            #end
-
             lhs += tau * var(wm, n, :x_res, a)[r_id]
-            rhs += (1 - zeta) * var(wm, n, :x_res, a)[r_id] * (lambda_e_p_sol * q_ub)
-            rhs -= (1 - zeta) * var(wm, n, :x_res, a)[r_id] * (lambda_e_n_sol * q_lb)
 
-            #if r_id == resistance_indices[a]
-            #    #lhs_d += tau
-            #    #rhs_d += (1 - zeta) * (lambda_e_p_sol * q_ub)
-            #    #rhs_d -= (1 - zeta) * (lambda_e_n_sol * q_lb)
-            #end
-
-            #if r_id == resistance_indices[a]
-            #    rhs += zeta * sum(var(wm, n, :x_res, a)) * max(q_sol * (h_i_ub - h_j_lb), q_sol * (h_i_lb - h_j_ub))
-            #else
-            #    rhs += (1 - zeta) * var(wm, n, :x_res, a)[r_id] * max(mu_e_sol * (h_i_ub - h_j_lb), mu_e_sol * (h_i_lb - h_j_ub))
-            #end
-            #rhs += zeta * max(q_sol * (h_i_ub - h_j_lb), q_sol * (h_i_lb - h_j_ub))
-            #rhs += (1 - zeta) * max(mu_e_sol * (h_i_ub - h_j_lb), mu_e_sol * (h_i_lb - h_j_ub))
+            if r_id == resistance_indices[a]
+                rhs += (1 - zeta) * var(wm, n, :x_res, a)[r_id] * (lambda_e_p_sol * q_ub)
+                rhs -= (1 - zeta) * var(wm, n, :x_res, a)[r_id] * (lambda_e_n_sol * q_lb)
+            end
         end
     end
 
-    #println(lhs_d, " ", rhs_d, " ", (1 - zeta) * (rhs_d - lhs_d), " ", JuMP.objective_value(model))
-   
     c = JuMP.@constraint(wm.model, lhs <= rhs)
-    println(c)
-    #println(c)
-    ##println(c)
-
-    #xr_ones = Array{JuMP.VariableRef, 1}()
-    #xr_zeros = Array{JuMP.VariableRef, 1}()
-
-    #for (a, link) in wm.ref[:nw][n][:links_ne]
-    #    xr = JuMP.value.(wm.var[:nw][n][:x_res][a])
-    #    r_id = resistance_indices[a]
-    #    zero_indices = setdiff(1:length(xr), [r_id])
-    #    xr_ones = vcat(xr_ones, wm.var[:nw][n][:x_res][a][r_id])
-    #    xr_zeros = vcat(xr_zeros, wm.var[:nw][n][:x_res][a][zero_indices])
-    #end
-
-    #no_good_rhs = length(wm.ref[:nw][n][:links_ne]) - 1
-    #JuMP.@constraint(wm.model, sum(xr_ones) - sum(xr_zeros) <= no_good_rhs)
 end
