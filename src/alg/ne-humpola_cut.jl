@@ -1,3 +1,64 @@
+function compute_tau(wm::GenericWaterModel, q::Dict{Int, Float64},
+    mu_e::Dict{Int, Float64}, h::Dict{Int, Float64}, mu_v::Dict{Int, Float64},
+    lambda_e_p::Dict{Int, Float64}, lambda_e_n::Dict{Int, Float64}, zeta::Float64,
+    a::Int, optimizer::JuMP.OptimizerFactory, res::Float64, n::Int=wm.cnw)
+    L = WMs.ref(wm, n, :links, a)["length"]
+
+    i = WMs.ref(wm, n, :links, a)["node_fr"]
+    j = WMs.ref(wm, n, :links, a)["node_to"]
+
+    model = JuMP.Model(with_optimizer(optimizer))
+    q_e = JuMP.@variable(model, base_name="q")
+    alpha = WMs.get_alpha_min_1(wm)
+    JuMP.register(model, :head_loss, 1, WMs.f_alpha(alpha, convex=false),
+        WMs.df_alpha(alpha, convex=false), WMs.d2f_alpha(alpha, convex=false))
+
+    obj = JuMP.@NLobjective(model, MOI.MIN_SENSE, (zeta * (q_e - q[a]) + (1 - zeta) * mu_e[a]) *
+        (L * res * head_loss(q_e)) - zeta * (h[i] - h[j]) * q_e - (1 - zeta) *
+        (mu_v[i] - mu_v[j] - lambda_e_p[a] + lambda_e_n[a]) * q_e)
+
+    JuMP.optimize!(model)
+    return JuMP.objective_value(model)
+end
+
+function compute_zeta(wm::GenericWaterModel, q::Dict{Int, Float64},
+    mu_e::Dict{Int, Float64}, h::Dict{Int, Float64}, mu_v::Dict{Int, Float64},
+    lambda_e_p::Dict{Int, Float64}, lambda_e_n::Dict{Int, Float64}, n::Int=wm.cnw)
+
+    converged = false
+    zeta_m1 = 0.0
+    zeta = 0.0
+
+    while !converged
+        for a in keys(q)
+            zeta_m1 = zeta
+
+            i = WMs.ref(wm, n, :links, a)["node_fr"]
+            j = WMs.ref(wm, n, :links, a)["node_to"]
+
+            if mu_e[a] * q[a] > 0.0
+                if !(zeta * abs(q[a]) > (1 - zeta) * abs(mu_e[a]))
+                    zeta += 1.0e-5
+                    break
+                end
+            end
+
+            if mu_e[a] * q[a] < 0.0
+                if !((1 - zeta) * abs(mu_v[i] - mu_v[j] - lambda_e_p[a] + lambda_e_n[a]) < zeta * abs(mu_v[i] - mu_v[j]))
+                    zeta += 1.0e-5
+                    break
+                end
+            end
+        end
+
+        if isapprox(zeta, zeta_m1)
+            converged = true
+        end
+    end
+
+    return zeta
+end
+
 function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactory, n::Int=wm.cnw)
     q_sol, h_sol, resistance_indices = get_cnlp_solution(wm, optimizer)
     h_ids = sort(collect(keys(h_sol)))
@@ -60,12 +121,19 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
     JuMP.@objective(model, MOI.MIN_SENSE, sum(Delta_v) + sum(Delta_e))
     JuMP.optimize!(model)
 
-    lambda_v_p = Dict{Int, Float64}(i => max(0, JuMP.dual(c)) for (i, c) in head_ub)
+    lambda_v_p = Dict{Int, Float64}(i => max(0, -JuMP.dual(c)) for (i, c) in head_ub)
     lambda_v_n = Dict{Int, Float64}(i => max(0, JuMP.dual(c)) for (i, c) in head_lb)
     lambda_v = Dict{Int, Float64}(i => max(0, JuMP.dual(JuMP.LowerBoundRef(Delta_v[i]))) for i in h_ids)
-    lambda_e_p = Dict{Int, Float64}(a => max(0, JuMP.dual(c)) for (a, c) in flow_ub)
+    lambda_e_p = Dict{Int, Float64}(a => max(0, -JuMP.dual(c)) for (a, c) in flow_ub)
     lambda_e_n = Dict{Int, Float64}(a => max(0, JuMP.dual(c)) for (a, c) in flow_lb)
     lambda_e = Dict{Int, Float64}(a => max(0, JuMP.dual(JuMP.LowerBoundRef(Delta_e[a]))) for a in q_ids)
+
+    #lambda_v_p = Dict{Int, Float64}(i => JuMP.dual(c) for (i, c) in head_ub)
+    #lambda_v_n = Dict{Int, Float64}(i => JuMP.dual(c) for (i, c) in head_lb)
+    #lambda_v = Dict{Int, Float64}(i => JuMP.dual(JuMP.LowerBoundRef(Delta_v[i])) for i in h_ids)
+    #lambda_e_p = Dict{Int, Float64}(a => JuMP.dual(c) for (a, c) in flow_ub)
+    #lambda_e_n = Dict{Int, Float64}(a => JuMP.dual(c) for (a, c) in flow_lb)
+    #lambda_e = Dict{Int, Float64}(a => JuMP.dual(JuMP.LowerBoundRef(Delta_e[a])) for a in q_ids)
 
     mu_v = Dict{Int, Float64}(i => JuMP.dual(c) for (i, c) in conservation)
     mu_e = Dict{Int, Float64}(a => JuMP.dual(c) for (a, c) in loss)
@@ -75,43 +143,71 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
     Delta_v = Dict{Int, Float64}(i => JuMP.value(Delta_v[i]) for i in h_ids)
     Delta_e = Dict{Int, Float64}(a => JuMP.value(Delta_e[a]) for a in q_ids)
 
+    #for i in h_ids
+    #    arcs_fr = ref(wm, n, :node_arcs_fr, i)
+    #    arcs_to = ref(wm, n, :node_arcs_to, i)
+    #    res = ref(wm, n, :node_reservoirs, i)
+    #    junc = ref(wm, n, :node_junctions, i)
+    #    demands = Dict(k => ref(wm, n, :junctions, k, "demand") for k in junc)
+
+    #    #println(i, " ", arcs_fr, " ", arcs_to)
+    #    #println(i, " ", arcs_fr, " ", arcs_to)
+    #    ##println(i, " ", arcs_fr, " ", arcs_to)
+    #    #println(i, " ", arcs_fr, " ", arcs_to)
+
+    #    lhs = length(arcs_fr) > 0 ? -sum(q[l] for (l, f, t) in arcs_fr) : 0.0
+    #    lhs += length(arcs_to) > 0 ? sum(q[l] for (l, f, t) in arcs_to) : 0.0
+    #    rhs = length(res) > 0 ? -sum(qr[rid] for rid in res) : 0.0
+    #    rhs += length(demands) > 0 ? sum(demand for (jid, demand) in demands) : 0.0
+
+    #    #println(i, " ", lhs, " ", rhs)
+
+    #    #    sum(-qr[rid] for rid in res) +
+    #    #    sum(demand for (jid, demand) in demands))
+    #end
+
     # TODO: Find a way to calculate this.
-    zeta = 0.1
+    zeta = compute_zeta(wm, q, mu_e, h, mu_v, lambda_e_p, lambda_e_n, n)
+    println(zeta)
 
     lhs = JuMP.AffExpr(0.0)
     rhs = JuMP.AffExpr(0.0)
 
     rhs -= zeta * sum(h[i] * junc["demand"] for (i, junc) in ref(wm, n, :junctions))
+    rhs += zeta * sum(h[i] * qr[i] for (i, res) in ref(wm, n, :reservoirs))
     rhs -= (1 - zeta) * sum(mu_v[i] * junc["demand"] for (i, junc) in ref(wm, n, :junctions))
+    rhs += (1 - zeta) * sum(mu_v[i] * qr[i] for (i, res) in ref(wm, n, :reservoirs))
     rhs += (1 - zeta) * sum(lambda_v_p[i] * JuMP.upper_bound(WMs.var(wm, n, :h, i)) for i in h_ids)
     rhs -= (1 - zeta) * sum(lambda_v_n[i] * JuMP.lower_bound(WMs.var(wm, n, :h, i)) for i in h_ids)
 
     for a in q_ids
         for (r_id, r) in enumerate(ref(wm, n, :resistance, a))
+            i = WMs.ref(wm, n, :links, a)["node_fr"]
+            j = WMs.ref(wm, n, :links, a)["node_to"]
+            res = WMs.ref(wm, n, :resistance, a)[r_id]
+
+            h_i_ub = JuMP.upper_bound(WMs.var(wm, n, :h, i))
+            h_i_lb = JuMP.lower_bound(WMs.var(wm, n, :h, i))
+            h_j_ub = JuMP.upper_bound(WMs.var(wm, n, :h, j))
+            h_j_lb = JuMP.lower_bound(WMs.var(wm, n, :h, j))
+
             q_ub = JuMP.upper_bound(WMs.var(wm, n, :qp_ne, a)[r_id])
             q_lb = -JuMP.upper_bound(WMs.var(wm, n, :qn_ne, a)[r_id])
 
-            if r_id != 0
-                lhs += var(wm, n, :x_res, a)[r_id]
-                rhs += (1 - zeta) * var(wm, n, :x_res, a)[r_id] * (lambda_e_p[a] * q_ub)
-                rhs -= (1 - zeta) * var(wm, n, :x_res, a)[r_id] * (lambda_e_n[a] * q_lb)
-            else
-                i = WMs.ref(wm, n, :links, a)["node_fr"]
-                j = WMs.ref(wm, n, :links, a)["node_to"]
+            tau = compute_tau(wm, q, mu_e, h, mu_v, lambda_e_p, lambda_e_n, zeta, a, optimizer, res, n)
+            lhs += tau * var(wm, n, :x_res, a)[r_id]
+            rhs += (1 - zeta) * var(wm, n, :x_res, a)[r_id] * (lambda_e_p[a] * q_ub)
+            rhs -= (1 - zeta) * var(wm, n, :x_res, a)[r_id] * (lambda_e_n[a] * q_lb)
 
-                h_i_ub = JuMP.upper_bound(WMs.var(wm, n, :h, i))
-                h_i_lb = JuMP.lower_bound(WMs.var(wm, n, :h, i))
-                h_j_ub = JuMP.upper_bound(WMs.var(wm, n, :h, j))
-                h_j_lb = JuMP.lower_bound(WMs.var(wm, n, :h, j))
-
-                rhs += zeta * var(wm, n, :x_res, a)[r_id] * max(q[a] * (h_i_ub - h_j_lb), q[a] * (h_i_lb - h_j_ub))
-                rhs += (1 - zeta) * var(wm, n, :x_res, a)[r_id] * max(mu_e[a] * (h_i_ub - h_j_lb), mu_e[a] * (h_i_lb - h_j_ub))
-            end
+            #rhs += zeta * max(q[a] * (h_i_ub - h_j_lb), q[a] * (h_i_lb - h_j_ub))
+            #rhs += zeta * max(q[a] * (h_i_ub - h_j_lb), q[a] * (h_i_lb - h_j_ub))
+            #rhs += (1 - zeta) * max(mu_e[a] * (h_i_ub - h_j_lb), mu_e[a] * (h_i_lb - h_j_ub))
         end
     end
-    
-    c = JuMP.@constraint(wm.model, lhs >= rhs)
-    #println(c)
+   
+    c = JuMP.@constraint(wm.model, lhs <= rhs)
+    ##println(c)
+    ##println(c)
 
     #xr_ones = Array{JuMP.VariableRef, 1}()
     #xr_zeros = Array{JuMP.VariableRef, 1}()

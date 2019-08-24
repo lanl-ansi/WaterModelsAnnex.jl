@@ -5,8 +5,7 @@ are infeasible with respect to flow and/or head bounds.
 function ne_global(network_path::String, modifications_path::String,
                    nlp_optimizer::JuMP.OptimizerFactory,
                    mip_optimizer::JuMP.OptimizerFactory,
-                   add_feasibility_cut!::Function,
-                   geojson_path::String)
+                   add_feasibility_cut!::Function)
     # Read in the original network data.
     network = WMs.parse_file(network_path)
 
@@ -31,7 +30,7 @@ function ne_global(network_path::String, modifications_path::String,
     # Build the relaxed network expansion problem.
     ne = WMs.build_generic_model(network, WMs.MILPRWaterModel, WMs.post_ne)
 
-    max_iterations = 10
+    max_iterations = 2
     iteration_counter = 0
     design_is_feasible = false
     all_features = []
