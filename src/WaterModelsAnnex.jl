@@ -1,8 +1,10 @@
 module WaterModelsAnnex
 
 using WaterModels
+import WaterModelsAnalytics
 
 const WM = WaterModels
+const WMA = WaterModelsAnalytics
 const MOI = WM.MathOptInterface
 const MOIU = WM.MathOptInterface.Utilities
 const LOGGER = WM.Memento.getlogger(WM)
