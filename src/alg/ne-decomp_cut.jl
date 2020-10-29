@@ -30,7 +30,7 @@ function add_upstream_cut!(wm::GenericWaterModel, graph::LightGraphs.SimpleDiGra
 
     for edge in collect(LightGraphs.edges(upstream_graph))
         i, j = [node_map[edge.src], node_map[edge.dst]]
-        a = WMs.get_link_id(wm, i, j, n)
+        a = WM.get_link_id(wm, i, j, n)
         r_id = resistance_indices[a]
         zero_indices = setdiff(1:length(wm.var[:nw][n][:x_res][a]), [r_id])
         lhs += wm.var[:nw][n][:x_res][a][r_id]
@@ -59,8 +59,8 @@ function add_decomp_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactory
     arc_list = vcat(arc_list, collect(keys(filter(d -> !d.second, qub))))
 
     for a in Set(arc_list)
-        i = WMs.ref(wm, n, :links, a)["node_fr"]
-        j = WMs.ref(wm, n, :links, a)["node_to"]
+        i = WM.ref(wm, n, :links, a)["node_fr"]
+        j = WM.ref(wm, n, :links, a)["node_to"]
 
         if q[a] >= 0.0
             add_upstream_cut!(wm, graph, q, resistance_indices, i, n)

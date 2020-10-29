@@ -7,28 +7,28 @@ function ne_global(network_path::String, modifications_path::String,
                    mip_optimizer::JuMP.OptimizerFactory,
                    add_feasibility_cut!::Function)
     # Read in the original network data.
-    network = WMs.parse_file(network_path)
+    network = WM.parse_file(network_path)
 
     # Construct the CP feasibility model.
-    wf = WMs.build_generic_model(network, WMs.NCNLPWaterModel, WMs.post_wf)
+    wf = WM.build_generic_model(network, WM.NCNLPWaterModel, WM.post_wf)
     wf_result = WaterModels.run_wf(network, NCNLPWaterModel, nlp_optimizer)
 
     # Add the modifications to the network data and construct the MILPR model.
-    modifications = WMs.parse_file(modifications_path)
+    modifications = WM.parse_file(modifications_path)
     InfrastructureModels.update_data!(network, modifications)
     InfrastructureModels.update_data!(network, wf_result["solution"])
 
     # Prepare warm start values for the network expansion model.
-    WMs.set_start_head!(network)
-    WMs.set_start_directed_head_difference!(network)
-    WMs.set_start_undirected_flow_rate!(network)
-    WMs.set_start_directed_flow_rate!(network)
-    WMs.set_start_directed_flow_rate_ne!(network)
-    WMs.set_start_flow_direction!(network)
-    WMs.set_start_resistance_ne!(network)
+    WM.set_start_head!(network)
+    WM.set_start_directed_head_difference!(network)
+    WM.set_start_undirected_flow_rate!(network)
+    WM.set_start_directed_flow_rate!(network)
+    WM.set_start_directed_flow_rate_ne!(network)
+    WM.set_start_flow_direction!(network)
+    WM.set_start_resistance_ne!(network)
 
     # Build the relaxed network expansion problem.
-    ne = WMs.build_generic_model(network, WMs.MILPRWaterModel, WMs.post_ne)
+    ne = WM.build_generic_model(network, WM.MILPRWaterModel, WM.post_ne)
 
     max_iterations = 25
     iteration_counter = 0
@@ -38,7 +38,7 @@ function ne_global(network_path::String, modifications_path::String,
 
     while !design_is_feasible && iteration_counter != max_iterations
         iteration_counter += 1
-        ne_solution = WMs.solve_generic_model(ne, mip_optimizer)
+        ne_solution = WM.solve_generic_model(ne, mip_optimizer)
         objective_value = ne_solution["objective_value"]
 
         q, h, resistance_indices = get_cnlp_solution(ne, nlp_optimizer)

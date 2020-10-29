@@ -1,6 +1,6 @@
 using Ipopt
 
-function add_system!(wm::WMs.GenericWaterModel)
+function add_system!(wm::WM.GenericWaterModel)
     n = wm.cnw
     link_ids = collect(ids(wm, n, :links_ne))
     alpha = wm.ref[:nw][n][:alpha]
@@ -44,8 +44,8 @@ function add_system!(wm::WMs.GenericWaterModel)
     lambda_p_definition = Dict{Int, Dict{Int, JuMP.ConstraintRef}}()
     lambda_n_definition = Dict{Int, Dict{Int, JuMP.ConstraintRef}}()
 
-    junction_ids = WMs.ids(wm, n, :junctions)
-    reservoir_ids = WMs.ids(wm, n, :reservoirs)
+    junction_ids = WM.ids(wm, n, :junctions)
+    reservoir_ids = WM.ids(wm, n, :reservoirs)
     nodes = [junction_ids; reservoir_ids]
     #dh = Dict{Int, Array{JuMP.VariableRef}}()
     
@@ -241,12 +241,12 @@ designs that are infeasible with respect to flow and/or head bounds.
 function ne_primal_dual(network_path::String, modifications_path::String,
                         mip_optimizer::JuMP.OptimizerFactory)
     # Add the modifications to the network data and construct the MILPR model.
-    network = WMs.parse_file(network_path)
-    modifications = WMs.parse_file(modifications_path)
+    network = WM.parse_file(network_path)
+    modifications = WM.parse_file(modifications_path)
     InfrastructureModels.update_data!(network, modifications)
 
     # Build the relaxed network expansion problem.
-    ne = WMs.build_generic_model(network, WMs.MILPRWaterModel, WMs.post_ne)
+    ne = WM.build_generic_model(network, WM.MILPRWaterModel, WM.post_ne)
     add_system!(ne) # Add the primal-dual feasibility system.
-    ne_solution = WMs.solve_generic_model(ne, mip_optimizer)
+    ne_solution = WM.solve_generic_model(ne, mip_optimizer)
 end

@@ -8,9 +8,9 @@ function add_tasseff_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
     end
 
     model = JuMP.Model(JuMP.with_optimizer(optimizer))
-    link_ids = collect(WMs.ids(wm, n, :links))
-    junction_ids = collect(WMs.ids(wm, n, :junctions))
-    reservoir_ids = collect(WMs.ids(wm, n, :reservoirs))
+    link_ids = collect(WM.ids(wm, n, :links))
+    junction_ids = collect(WM.ids(wm, n, :junctions))
+    reservoir_ids = collect(WM.ids(wm, n, :reservoirs))
     node_ids = vcat(junction_ids, reservoir_ids)
 
     fp = JuMP.AffExpr(0.0)

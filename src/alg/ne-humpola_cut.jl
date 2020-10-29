@@ -3,15 +3,15 @@ function compute_tau(wm::GenericWaterModel, q::Float64,
     lambda_e_p::Float64, lambda_e_n::Float64, zeta::Float64,
     a::Int, optimizer::JuMP.OptimizerFactory, res::Float64, 
     q_lb::Float64, q_ub::Float64, n::Int=wm.cnw)
-    L = WMs.ref(wm, n, :links, a)["length"]
-    i = WMs.ref(wm, n, :links, a)["node_fr"]
-    j = WMs.ref(wm, n, :links, a)["node_to"]
+    L = WM.ref(wm, n, :links, a)["length"]
+    i = WM.ref(wm, n, :links, a)["node_fr"]
+    j = WM.ref(wm, n, :links, a)["node_to"]
 
     model = JuMP.Model(with_optimizer(optimizer))
     q_e = JuMP.@variable(model, lower_bound=q_lb, upper_bound=q_ub, base_name="q")
-    alpha = WMs.get_alpha_min_1(wm)
-    JuMP.register(model, :head_loss, 1, WMs.f_alpha(alpha, convex=false),
-        WMs.df_alpha(alpha, convex=false), WMs.d2f_alpha(alpha, convex=false))
+    alpha = WM.get_alpha_min_1(wm)
+    JuMP.register(model, :head_loss, 1, WM.f_alpha(alpha, convex=false),
+        WM.df_alpha(alpha, convex=false), WM.d2f_alpha(alpha, convex=false))
 
     obj = JuMP.@NLobjective(model, MOI.MIN_SENSE, (zeta * (q_e - q) + (1 - zeta) * mu_e) *
         (L * res * head_loss(q_e)) - zeta * (h[i] - h[j]) * q_e - (1 - zeta) *
@@ -32,8 +32,8 @@ function compute_zeta(wm::GenericWaterModel, q::Dict{Int, Float64},
         if mu_e[a] * q[a] > 0.0
             JuMP.@constraint(model, zeta * abs(q[a]) >= (1 - zeta) * abs(mu_e[a]))
         elseif mu_e[a] * q[a] < 0.0
-            i = WMs.ref(wm, n, :links, a)["node_fr"]
-            j = WMs.ref(wm, n, :links, a)["node_to"]
+            i = WM.ref(wm, n, :links, a)["node_fr"]
+            j = WM.ref(wm, n, :links, a)["node_to"]
             JuMP.@constraint(model, (1 - zeta) * abs(mu_v[i] - mu_v[j] - lambda_e_p[a] + lambda_e_n[a]) <= zeta * abs(mu_v[i] - mu_v[j]))
         else
             JuMP.@constraint(model, (1 - zeta) * mu_e[a] == 0.0)
@@ -49,7 +49,7 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
     q_sol, h_sol, resistance_indices = get_cnlp_solution(wm, optimizer)
     h_ids = sort(collect(keys(h_sol)))
     q_ids = sort(collect(keys(q_sol)))
-    alpha = WMs.ref(wm, n, :alpha)
+    alpha = WM.ref(wm, n, :alpha)
 
     model = JuMP.Model(with_optimizer(optimizer))
     q = JuMP.@variable(model, [a in q_ids], base_name="q")
@@ -65,20 +65,20 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
     flow_lb = Dict{Int, JuMP.ConstraintRef}()
     flow_ub = Dict{Int, JuMP.ConstraintRef}()
 
-    alpha = WMs.get_alpha_min_1(wm)
-    JuMP.register(model, :head_loss, 1, WMs.f_alpha(alpha, convex=false),
-        WMs.df_alpha(alpha, convex=false), WMs.d2f_alpha(alpha, convex=false))
+    alpha = WM.get_alpha_min_1(wm)
+    JuMP.register(model, :head_loss, 1, WM.f_alpha(alpha, convex=false),
+        WM.df_alpha(alpha, convex=false), WM.d2f_alpha(alpha, convex=false))
 
     for a in q_ids
         r = resistance_indices[a]
-        i = WMs.ref(wm, n, :links, a)["node_fr"]
-        j = WMs.ref(wm, n, :links, a)["node_to"]
-        L = WMs.ref(wm, n, :links, a)["length"]
-        res = WMs.ref(wm, n, :resistance, a)[r]
+        i = WM.ref(wm, n, :links, a)["node_fr"]
+        j = WM.ref(wm, n, :links, a)["node_to"]
+        L = WM.ref(wm, n, :links, a)["length"]
+        res = WM.ref(wm, n, :resistance, a)[r]
         loss[a] = JuMP.@NLconstraint(model, L*res * head_loss(q[a]) == h[i] - h[j])
 
-        q_ub = JuMP.upper_bound(WMs.var(wm, n, :qp_ne, a)[r])
-        q_lb = -JuMP.upper_bound(WMs.var(wm, n, :qn_ne, a)[r])
+        q_ub = JuMP.upper_bound(WM.var(wm, n, :qp_ne, a)[r])
+        q_lb = -JuMP.upper_bound(WM.var(wm, n, :qn_ne, a)[r])
         flow_ub[a] = JuMP.@constraint(model, q[a] - Delta_e[a] <= q_ub)
         flow_lb[a] = JuMP.@constraint(model, q[a] + Delta_e[a] >= q_lb)
     end
@@ -98,8 +98,8 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
 
         conservation[i] = c
 
-        h_ub = JuMP.upper_bound(WMs.var(wm, n, :h, i))
-        h_lb = JuMP.lower_bound(WMs.var(wm, n, :h, i))
+        h_ub = JuMP.upper_bound(WM.var(wm, n, :h, i))
+        h_lb = JuMP.lower_bound(WM.var(wm, n, :h, i))
         head_ub[i] = JuMP.@constraint(model, h[i] - Delta_v[i] <= h_ub)
         head_lb[i] = JuMP.@constraint(model, h[i] + Delta_v[i] >= h_lb)
     end
@@ -130,22 +130,22 @@ function add_humpola_cut!(wm::GenericWaterModel, optimizer::JuMP.OptimizerFactor
     rhs -= zeta * sum(h[i] * qr[i] for (i, res) in ref(wm, n, :reservoirs))
     rhs -= (1 - zeta) * sum(mu_v[i] * -junc["demand"] for (i, junc) in ref(wm, n, :junctions))
     rhs -= (1 - zeta) * sum(mu_v[i] * qr[i] for (i, res) in ref(wm, n, :reservoirs))
-    rhs += (1 - zeta) * sum(lambda_v_p[i] * JuMP.upper_bound(WMs.var(wm, n, :h, i)) for i in h_ids)
-    rhs -= (1 - zeta) * sum(lambda_v_n[i] * JuMP.lower_bound(WMs.var(wm, n, :h, i)) for i in h_ids)
+    rhs += (1 - zeta) * sum(lambda_v_p[i] * JuMP.upper_bound(WM.var(wm, n, :h, i)) for i in h_ids)
+    rhs -= (1 - zeta) * sum(lambda_v_n[i] * JuMP.lower_bound(WM.var(wm, n, :h, i)) for i in h_ids)
 
     for a in q_ids
         for (r_id, r) in enumerate(ref(wm, n, :resistance, a))
-            i = WMs.ref(wm, n, :links, a)["node_fr"]
-            j = WMs.ref(wm, n, :links, a)["node_to"]
-            res = WMs.ref(wm, n, :resistance, a)[r_id]
+            i = WM.ref(wm, n, :links, a)["node_fr"]
+            j = WM.ref(wm, n, :links, a)["node_to"]
+            res = WM.ref(wm, n, :resistance, a)[r_id]
 
-            h_i_ub = JuMP.upper_bound(WMs.var(wm, n, :h, i))
-            h_i_lb = JuMP.lower_bound(WMs.var(wm, n, :h, i))
-            h_j_ub = JuMP.upper_bound(WMs.var(wm, n, :h, j))
-            h_j_lb = JuMP.lower_bound(WMs.var(wm, n, :h, j))
+            h_i_ub = JuMP.upper_bound(WM.var(wm, n, :h, i))
+            h_i_lb = JuMP.lower_bound(WM.var(wm, n, :h, i))
+            h_j_ub = JuMP.upper_bound(WM.var(wm, n, :h, j))
+            h_j_lb = JuMP.lower_bound(WM.var(wm, n, :h, j))
 
-            q_ub = JuMP.upper_bound(WMs.var(wm, n, :qp_ne, a)[r_id])
-            q_lb = -JuMP.upper_bound(WMs.var(wm, n, :qn_ne, a)[r_id])
+            q_ub = JuMP.upper_bound(WM.var(wm, n, :qp_ne, a)[r_id])
+            q_lb = -JuMP.upper_bound(WM.var(wm, n, :qn_ne, a)[r_id])
 
             mu_e_sol = r_id == resistance_indices[a] ? mu_e[a] : 0.0
             lambda_e_p_sol = r_id == resistance_indices[a] ? lambda_e_p[a] : 0.0

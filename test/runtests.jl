@@ -11,7 +11,7 @@ import JSON
 import MathOptInterface
 const MOI = MathOptInterface
 const MOIU = MathOptInterface.Utilities
-const WMs = WaterModels
+const WM = WaterModels
 
 using Test
 

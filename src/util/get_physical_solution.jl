@@ -25,8 +25,8 @@ function get_cnlp_solution(wm::GenericWaterModel, nlp_optimizer::JuMP.OptimizerF
         network["pipes"][string(a)]["resistance"] = resistance
     end
 
-    wf = WMs.build_generic_model(network, WMs.CNLPWaterModel, WMs.post_wf)
-    wf_result = WMs.solve_generic_model(wf, nlp_optimizer)
+    wf = WM.build_generic_model(network, WM.CNLPWaterModel, WM.post_wf)
+    wf_result = WM.solve_generic_model(wf, nlp_optimizer)
 
     q = Dict(parse(Int, a) => pipe["q"] for (a, pipe) in wf_result["solution"]["pipes"])
     r = Dict(parse(Int, a) => pipe["r"] for (a, pipe) in wf_result["solution"]["pipes"])
