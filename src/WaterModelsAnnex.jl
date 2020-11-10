@@ -21,7 +21,7 @@ function silence()
     WM.Memento.setlevel!(Memento.getlogger(WM), "error")
 end
 
-include("alg/solve-owf.jl")
+include("alg/solve_owf.jl")
 
 #include("alg/ne-add_tasseff.jl")
 #include("alg/ne-global.jl")
