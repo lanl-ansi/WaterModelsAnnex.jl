@@ -14,7 +14,7 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
 
     # Construct the OWF model.
     network_mn = WM.make_multinetwork(network)
-    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
+    ext = Dict(:pipe_breakpoints => 1, :pump_breakpoints => 3)
     wm = WM.instantiate_model(network_mn, LRDWaterModel, build_mn_owf; ext=ext)
 
     # Introduce an auxiliary variable for the objective and constrain it.
@@ -67,10 +67,12 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
             con = WM.JuMP.@build_constraint(sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
             WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
         else
+            relaxed_objective = WM.JuMP.callback_value(cb_data, objective_var)
             true_objective = _calc_wntr_objective(wm_nlp, wn, wnres)
             bin_expr = true_objective * (length(one_vars) - sum(one_vars) + sum(zero_vars))
             con = WM.JuMP.@build_constraint(objective_var >= true_objective - bin_expr)
             WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
+            #println("Updating the objective from $(relaxed_objective) to $(true_objective)")
         end
     end
 
