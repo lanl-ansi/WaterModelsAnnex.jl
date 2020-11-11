@@ -63,6 +63,8 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
             objective_difference = true_objective - objective_value
 
             # TODO: Add a cut based on the above below.
+            con = WM.JuMP.@build_constraint(objective_var >= true_objective - true_objective * (length(one_vars) - sum(one_vars) + sum(zero_vars)))
+            WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
         end
     end
 
