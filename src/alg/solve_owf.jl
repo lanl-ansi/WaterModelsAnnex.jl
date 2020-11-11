@@ -14,7 +14,7 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
 
     # Construct the OWF model.
     network_mn = WM.make_multinetwork(network)
-    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 5)
+    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
     wm = WM.instantiate_model(network_mn, LRDWaterModel, build_mn_owf; ext=ext)
 
     # Introduce an auxiliary variable for the objective and constrain it.
@@ -56,14 +56,10 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
             # If the solution is not feasible (according to a comparison with WNTR), add a no-good cut.
             con = WM.JuMP.@build_constraint(sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
             WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
+        else
             true_objective = _calc_wntr_objective(wm_nlp, network_path)
-        elseif solution_is_feasible
-            true_objective = _calc_wntr_objective(wm_nlp, network_path)
-            objective_value = WM.JuMP.callback_value(cb_data, objective_var)
-            objective_difference = true_objective - objective_value
-
-            # TODO: Add a cut based on the above below.
-            con = WM.JuMP.@build_constraint(objective_var >= true_objective - true_objective * (length(one_vars) - sum(one_vars) + sum(zero_vars)))
+            bin_expr = true_objective * (length(one_vars) - sum(one_vars) + sum(zero_vars))
+            con = WM.JuMP.@build_constraint(objective_var >= true_objective - bin_expr)
             WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
         end
     end
@@ -72,7 +68,7 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
     WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), lazy_cut_callback)
 
     # Solve the OWF optimization problem.
-    result = WM.optimize_model!(wm)
+    return WM.optimize_model!(wm)
 end
 
 
@@ -106,7 +102,7 @@ function _add_owf_feasibility_cut!(wm::AbstractWaterModel)
     vars = _get_indicator_variables(wm)
     zero_vars = filter(x -> round(WM.JuMP.value(x)) == 0.0, vars)
     one_vars = filter(x -> round(WM.JuMP.value(x)) == 1.0, vars)
-    WM.JuMP.@constraint(wm.model, sum(zero_vars) - sum(one_vars) >= 1 - length(one_vars))
+    WM.JuMP.@constraint(wm.model, sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
 end
 
 
