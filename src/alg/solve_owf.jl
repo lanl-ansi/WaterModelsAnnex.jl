@@ -42,6 +42,8 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
     wm_nlp = WM.instantiate_model(network_mn_nlp, CRDWaterModel, build_mn_owf)
     WM.relax_all_binary_variables!(wm_nlp)
     nlp_result = WM.optimize_model!(wm_nlp; optimizer = nlp_optimizer)
+    num_infeasible_solutions = 0 # Number of integer *infeasible* solutions.
+    objective_comparison_table = [] # Compares relaxed versus true objectives.
 
     function lazy_cut_callback(cb_data) # Define the lazy cut callback function.
         # Populate the solution of wm_nlp to use in the feasibility check.
@@ -66,13 +68,14 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
             # If the solution is not feasible (according to a comparison with WNTR), add a no-good cut.
             con = WM.JuMP.@build_constraint(sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
             WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
+            num_infeasible_solutions += 1
         else
             relaxed_objective = WM.JuMP.callback_value(cb_data, objective_var)
             true_objective = _calc_wntr_objective(wm_nlp, wn, wnres)
             bin_expr = true_objective * (length(one_vars) - sum(one_vars) + sum(zero_vars))
             con = WM.JuMP.@build_constraint(objective_var >= true_objective - bin_expr)
             WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
-            #println("Updating the objective from $(relaxed_objective) to $(true_objective)")
+            push!(objective_comparison_table, (relaxed_objective, true_objective))
         end
     end
 
@@ -80,7 +83,14 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
     WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), lazy_cut_callback)
 
     # Solve the OWF optimization problem.
-    return WM.optimize_model!(wm)
+    result = WM.optimize_model!(wm)
+
+    # Save relevant algorithm metadata within the result object.
+    result["objective_comparison"] = objective_comparison_table
+    result["num_infeasible_solutions"] = num_infeasible_solutions
+
+    # Return the optimization result dictionary.
+    return result
 end
 
 
