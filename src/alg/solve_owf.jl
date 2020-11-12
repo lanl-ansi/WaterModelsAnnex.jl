@@ -58,18 +58,32 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
         short_pipe_infeas = _calc_short_pipe_infeasibilities(wm_nlp, wn, wnres)
         valve_infeas = _calc_valve_infeasibilities(wm_nlp, wn, wnres)
 
-        # Collect the current integer solution into "zero" and "one" buckets.
-        vars = _get_indicator_variables(wm) # All relevant component status variables.
-        zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
-        one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
-
         if sum(node_infeas) + sum(pipe_infeas) + sum(pump_infeas) + sum(regulator_infeas) +
             sum(short_pipe_infeas) + sum(valve_infeas) > 0.0 # If any infeasibility exists...
+            # Find the index of the first time step at which infeasibility is detected.
+            node_nw = sum(node_infeas) > 0.0 ? findfirst(x -> x > 0.0, node_infeas')[2] : 0
+            pipe_nw = sum(pipe_infeas) > 0.0 ? findfirst(x -> x > 0.0, pipe_infeas')[2] : 0
+            pump_nw = sum(pump_infeas) > 0.0 ? findfirst(x -> x > 0.0, pump_infeas')[2] : 0
+            regulator_nw = sum(regulator_infeas) > 0.0 ? findfirst(x -> x > 0.0, regulator_infeas')[2] : 0
+            short_pipe_nw = sum(short_pipe_infeas) > 0.0 ? findfirst(x -> x > 0.0, short_pipe_infeas')[2] : 0
+            valve_nw = sum(valve_infeas) > 0.0 ? findfirst(x -> x > 0.0, valve_infeas')[2] : 0
+            max_nw = max(node_nw, pipe_nw, pump_nw, regulator_nw, short_pipe_nw, valve_nw)
+
+            # Collect the current integer solution into "zero" and "one" buckets.
+            vars = _get_indicator_variables_to_nw(wm, max_nw) # All relevant component status variables.
+            zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
+            one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
+
             # If the solution is not feasible (according to a comparison with WNTR), add a no-good cut.
             con = WM.JuMP.@build_constraint(sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
             WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
             num_infeasible_solutions += 1
         else
+            # Collect the current integer solution into "zero" and "one" buckets.
+            vars = _get_indicator_variables(wm) # All relevant component status variables.
+            zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
+            one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
+
             relaxed_objective = WM.JuMP.callback_value(cb_data, objective_var)
             true_objective = _calc_wntr_objective(wm_nlp, wn, wnres)
             bin_expr = true_objective * (length(one_vars) - sum(one_vars) + sum(zero_vars))
@@ -106,6 +120,21 @@ function _populate_solution!(cb_data, wm_cb::AbstractWaterModel, wm::AbstractWat
         end
     end
 end
+
+
+function _get_indicator_variables_to_nw(wm::AbstractWaterModel, nw_last::Int)
+    vars = Array{WM.JuMP.VariableRef, 1}()
+    network_ids = sort(collect(WM.nw_ids(wm)))[1:nw_last]
+
+    for var_sym in [:z_pump, :z_regulator, :z_valve]
+        for nw_id in network_ids
+            append!(vars, vcat(WM.var(wm, nw_id, var_sym)...))
+        end
+    end
+
+    return vars
+end
+
 
 function _get_indicator_variables(wm::AbstractWaterModel)
     vars = Array{WM.JuMP.VariableRef, 1}()
