@@ -19,7 +19,7 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
 
     # Introduce an auxiliary variable for the objective and constrain it.
     objective_function = WM.JuMP.objective_function(wm.model)
-    objective_var = WM.JuMP.@variable(wm.model, base_name = "objective_auxiliary")
+    objective_var = WM.JuMP.@variable(wm.model, base_name = "obj_aux", lower_bound = 0.0)
     WM.JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective_var)
     WM.JuMP.@constraint(wm.model, objective_function <= objective_var)
 
