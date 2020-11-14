@@ -1,12 +1,27 @@
-function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_optimizer)
+function solve_obbt(network_path::String, obbt_optimizer)
     # Read in the original network data.
     network = WM.parse_file(network_path)
 
     # Tighten the bounds in the network.
-    ext = Dict{Symbol, Any}(:pipe_breakpoints => 10, :pump_breakpoints => 10)
+    ext = Dict{Symbol, Any}(:pipe_breakpoints => 5, :pump_breakpoints => 5)
     WM.run_obbt_owf!(network, obbt_optimizer; model_type = LRDWaterModel, solve_relaxed = false, ext=ext)
 
+    # Get tightened network data.
+    return network
+end
+
+
+function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_optimizer)
+    # Tighten the bounds in the network.
+    network = solve_obbt(network_path, obbt_optimizer)
+    result = solve_owf(network_path, network, obbt_optimizer, owf_optimizer, nlp_optimizer)
+    return result
+end
+
+
+function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer, nlp_optimizer)
     # Get pairwise cutting planes from the network-relaxed problem.
+    ext = Dict{Symbol, Any}(:pipe_breakpoints => 10, :pump_breakpoints => 10)
     wm = instantiate_model(network, LRDWaterModel, build_owf; ext=ext)
     WM.JuMP.set_optimizer(wm.model, obbt_optimizer)
     problem_sets = WM._get_pairwise_problem_sets(wm; nw = wm.cnw)
@@ -14,7 +29,8 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
 
     # Construct the OWF model.
     network_mn = WM.make_multinetwork(network)
-    ext = Dict(:pipe_breakpoints => 1, :pump_breakpoints => 3)
+    #WM.make_tank_start_dispatchable!(network_mn)
+    ext = Dict(:pipe_breakpoints => 5, :pump_breakpoints => 5)
     wm = WM.instantiate_model(network_mn, LRDWaterModel, build_mn_owf; ext=ext)
 
     # Introduce an auxiliary variable for the objective and constrain it.
