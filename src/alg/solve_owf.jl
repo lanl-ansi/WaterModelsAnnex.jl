@@ -61,13 +61,13 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
         if sum(node_infeas) + sum(pipe_infeas) + sum(pump_infeas) + sum(regulator_infeas) +
             sum(short_pipe_infeas) + sum(valve_infeas) > 0.0 # If any infeasibility exists...
             # Find the index of the first time step at which infeasibility is detected.
-            node_nw = sum(node_infeas) > 0.0 ? findfirst(x -> x > 0.0, node_infeas')[2] : 0
-            pipe_nw = sum(pipe_infeas) > 0.0 ? findfirst(x -> x > 0.0, pipe_infeas')[2] : 0
-            pump_nw = sum(pump_infeas) > 0.0 ? findfirst(x -> x > 0.0, pump_infeas')[2] : 0
-            regulator_nw = sum(regulator_infeas) > 0.0 ? findfirst(x -> x > 0.0, regulator_infeas')[2] : 0
-            short_pipe_nw = sum(short_pipe_infeas) > 0.0 ? findfirst(x -> x > 0.0, short_pipe_infeas')[2] : 0
-            valve_nw = sum(valve_infeas) > 0.0 ? findfirst(x -> x > 0.0, valve_infeas')[2] : 0
-            max_nw = max(node_nw, pipe_nw, pump_nw, regulator_nw, short_pipe_nw, valve_nw)
+            node_nw = sum(node_infeas) > 0.0 ? findfirst(x -> x > 0.0, node_infeas')[2] : 0.0
+            pipe_nw = sum(pipe_infeas) > 0.0 ? findfirst(x -> x > 0.0, pipe_infeas')[2] : 0.0
+            pump_nw = sum(pump_infeas) > 0.0 ? findfirst(x -> x > 0.0, pump_infeas')[2] : 0.0
+            regulator_nw = sum(regulator_infeas) > 0.0 ? findfirst(x -> x > 0.0, regulator_infeas')[2] : 0.0
+            short_pipe_nw = sum(short_pipe_infeas) > 0.0 ? findfirst(x -> x > 0.0, short_pipe_infeas')[2] : 0.0
+            valve_nw = sum(valve_infeas) > 0.0 ? findfirst(x -> x > 0.0, valve_infeas')[2] : 0.0
+            max_nw = Int(max(node_nw, pipe_nw, pump_nw, regulator_nw, short_pipe_nw, valve_nw))
 
             # Collect the current integer solution into "zero" and "one" buckets.
             vars = _get_indicator_variables_to_nw(wm, max_nw) # All relevant component status variables.
@@ -95,6 +95,64 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
 
     # Register the lazy cut callback with the JuMP modeling object.
     WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), lazy_cut_callback)
+
+    function user_cut_callback(cb_data) # Define the user cut callback function.
+        for nw in WM.nw_ids(wm)
+            exponent = WM.ref(wm, nw, :alpha)
+            pipe_ids = collect(WM.ids(wm, nw, :pipe))
+            L = [WM.ref(wm, nw, :pipe, i)["length"] for i in pipe_ids]
+            r = [WM.ref(wm, nw, :resistance, i)[1] for i in pipe_ids]
+
+            qp, qn = WM.var(wm, nw, :qp_pipe), WM.var(wm, nw, :qn_pipe)
+            qp_vals = [max(0.0, WM.JuMP.callback_value(cb_data, qp[i])) for i in pipe_ids]
+            qn_vals = [max(0.0, WM.JuMP.callback_value(cb_data, qn[i])) for i in pipe_ids]
+
+            dhp, dhn = WM.var(wm, nw, :dhp_pipe), WM.var(wm, nw, :dhn_pipe)
+            dhp_vals = [max(0.0, WM.JuMP.callback_value(cb_data, dhp[i])) for i in pipe_ids]
+            dhn_vals = [max(0.0, WM.JuMP.callback_value(cb_data, dhn[i])) for i in pipe_ids]
+
+            dhp_ests = L .* r .* qp_vals.^(exponent)
+            dhn_ests = L .* r .* qn_vals.^(exponent)
+
+            for i in 1:length(pipe_ids)
+                if abs(dhp_vals[i] - dhp_ests[i]) > 1.0e-1
+                    y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
+                    lhs = WM._get_head_loss_oa_binary(qp[pipe_ids[i]], y, qp_vals[i], exponent)
+                    con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhp[pipe_ids[i]])
+                    WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                elseif abs(dhn_vals[i] - dhn_ests[i]) > 1.0e-1
+                    y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
+                    lhs = WM._get_head_loss_oa_binary(qn[pipe_ids[i]], 1.0 - y, qn_vals[i], exponent)
+                    con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhn[pipe_ids[i]])
+                    WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                end
+            end
+        end
+
+        for nw in WM.nw_ids(wm)
+            pump_ids = collect(WM.ids(wm, nw, :pump))
+
+            qp, g, z  = WM.var(wm, nw, :qp_pump), WM.var(wm, nw, :g_pump), WM.var(wm, nw, :z_pump)
+            qp_vals = [max(0.0, WM.JuMP.callback_value(cb_data, qp[i])) for i in pump_ids]
+            g_vals = [max(0.0, WM.JuMP.callback_value(cb_data, g[i])) for i in pump_ids]
+            z_vals = [WM.JuMP.callback_value(cb_data, z[i]) >= 0.5 ? 1.0 : 0.0 for i in pump_ids]
+
+            head_curves = [WM.ref(wm, nw, :pump, i)["head_curve"] for i in pump_ids]
+            pcs = [WM._get_function_from_head_curve(head_curves[i]) for i in 1:length(pump_ids)]
+            g_ests = [(pcs[i][1] * qp_vals[i]^2) + (pcs[i][2] * qp_vals[i]) + pcs[i][3] * z_vals[i] for i in 1:length(pump_ids)]
+
+            for i in 1:length(pump_ids)
+                if abs(g_vals[i] - g_ests[i]) > 1.0e-1
+                    rhs = WM._get_head_gain_oa(qp[pump_ids[i]], z[pump_ids[i]], qp_vals[i], pcs[i])
+                    con = WM.JuMP.@build_constraint(g[pump_ids[i]] <= rhs)
+                    WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                end
+            end
+        end
+    end
+
+    # Register the user cut callback with the JuMP modeling object.
+    WM._MOI.set(wm.model, WM._MOI.UserCutCallback(), user_cut_callback)
 
     # Solve the OWF optimization problem.
     result = WM.optimize_model!(wm)
