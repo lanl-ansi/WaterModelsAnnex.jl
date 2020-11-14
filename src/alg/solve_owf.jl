@@ -1,10 +1,10 @@
-function solve_obbt(network_path::String, obbt_optimizer)
+function solve_obbt(network_path::String, obbt_optimizer; time_limit::Float64 = 3600.0)
     # Read in the original network data.
     network = WM.parse_file(network_path)
 
     # Tighten the bounds in the network.
     ext = Dict{Symbol, Any}(:pipe_breakpoints => 5, :pump_breakpoints => 5)
-    WM.run_obbt_owf!(network, obbt_optimizer; model_type = LRDWaterModel, solve_relaxed = false, ext=ext)
+    WM.run_obbt_owf!(network, obbt_optimizer; model_type = LRDWaterModel, solve_relaxed = false, ext = ext, time_limit = time_limit)
 
     # Get tightened network data.
     return network
