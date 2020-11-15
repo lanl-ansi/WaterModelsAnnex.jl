@@ -1,3 +1,5 @@
+import Gurobi
+
 function solve_obbt(network_path::String, obbt_optimizer; time_limit::Float64 = 3600.0)
     # Read in the original network data.
     network = WM.parse_file(network_path)
@@ -24,6 +26,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     ext = Dict{Symbol, Any}(:pipe_breakpoints => 10, :pump_breakpoints => 10)
     wm = instantiate_model(network, LRDWaterModel, build_owf; ext=ext)
     WM.JuMP.set_optimizer(wm.model, obbt_optimizer)
+
     problem_sets = WM._get_pairwise_problem_sets(wm; nw = wm.cnw)
     cuts = WM._compute_pairwise_cuts!(wm, problem_sets)
 
@@ -31,7 +34,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     network_mn = WM.make_multinetwork(network)
     #WM.make_tank_start_dispatchable!(network_mn)
     ext = Dict(:pipe_breakpoints => 5, :pump_breakpoints => 5)
-    wm = WM.instantiate_model(network_mn, LRDWaterModel, build_mn_owf; ext=ext)
+    wm = WM.instantiate_model(network_mn, LRDWaterModel, build_mn_owf; ext = ext)
 
     # Introduce an auxiliary variable for the objective and constrain it.
     objective_function = WM.JuMP.objective_function(wm.model)
@@ -165,6 +168,62 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
                 end
             end
         end
+
+        indicator_vars = _get_indicator_variables(wm)
+        indicator_vals = WM.JuMP.callback_value.(Ref(cb_data), indicator_vars)
+        is_integer = all(x -> isapprox(x, 1.0; atol = 0.01) || isapprox(x, 0.0; atol = 0.01), indicator_vals)
+
+        if is_integer
+            # Populate the solution of wm_nlp to use in the feasibility check.
+            _populate_solution!(cb_data, wm, wm_nlp)
+            wn, wnres = _simulate_solution(wm_nlp, network_path)
+            _update_pipe_flows!(wm_nlp, wn, wnres)
+            _update_pump_flows!(wm_nlp, wn, wnres)
+
+            for nw in WM.nw_ids(wm)
+                exponent = WM.ref(wm, nw, :alpha)
+                nw_sol = wm_nlp.solution["nw"][string(nw)]
+                pipe_ids = collect(WM.ids(wm, nw, :pipe))
+                q_sol = [nw_sol["pipe"][string(i)]["q"] for i in pipe_ids]
+
+                L = [WM.ref(wm, nw, :pipe, i)["length"] for i in pipe_ids]
+                r = [WM.ref(wm, nw, :resistance, i)[1] for i in pipe_ids]
+                qp, qn = WM.var(wm, nw, :qp_pipe), WM.var(wm, nw, :qn_pipe)
+                dhp, dhn = WM.var(wm, nw, :dhp_pipe), WM.var(wm, nw, :dhn_pipe)
+
+                for i in 1:length(pipe_ids)
+                    if q_sol[i] > 0.0
+                        y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
+                        lhs = WM._get_head_loss_oa_binary(qp[pipe_ids[i]], y, q_sol[i], exponent)
+                        con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhp[pipe_ids[i]])
+                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                    elseif q_sol[i] < 0.0
+                        y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
+                        lhs = WM._get_head_loss_oa_binary(qn[pipe_ids[i]], 1.0 - y, -q_sol[i], exponent)
+                        con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhn[pipe_ids[i]])
+                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                    end
+                end
+            end
+
+            for nw in WM.nw_ids(wm)
+                pump_ids = collect(WM.ids(wm, nw, :pump))
+                qp, g, z  = WM.var(wm, nw, :qp_pump), WM.var(wm, nw, :g_pump), WM.var(wm, nw, :z_pump)
+                head_curves = [WM.ref(wm, nw, :pump, i)["head_curve"] for i in pump_ids]
+                pcs = [WM._get_function_from_head_curve(head_curves[i]) for i in 1:length(pump_ids)]
+
+                nw_sol = wm_nlp.solution["nw"][string(nw)]
+                q_sol = [nw_sol["pump"][string(i)]["q"] for i in pump_ids]
+
+                for i in 1:length(pump_ids)
+                    if q_sol[i] > 1.0e-6
+                        rhs = WM._get_head_gain_oa(qp[pump_ids[i]], z[pump_ids[i]], q_sol[i], pcs[i])
+                        con = WM.JuMP.@build_constraint(g[pump_ids[i]] <= rhs)
+                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                    end
+                end
+            end
+        end
     end
 
     # Register the user cut callback with the JuMP modeling object.
@@ -179,6 +238,15 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
 
     # Return the optimization result dictionary.
     return result
+end
+
+
+function _set_branch_priorities(wm::AbstractWaterModel)
+    for nw in WM.nw_ids(wm)
+        pump_vars = WM.var(wm, nw, :z_pump)
+        attribute = Gurobi.VariableAttribute("BranchPriority")
+        WM._MOI.set(wm.model, attribute, pump_vars[1], 3)
+    end
 end
 
 
@@ -252,6 +320,32 @@ function _calc_node_infeasibilities(wm::AbstractWaterModel, wn, wnres)
 
     inf[inf .< 1.0e-3] .= 0.0 # Replace small infeasibilities with zero.
     return inf # Return the matrix of node head infeasibilities.
+end
+
+
+function _update_pipe_flows!(wm::AbstractWaterModel, wn, wnres)
+    wm_solution = Dict{String, Any}("solution" => wm.solution)
+
+    for i in WM.ids(wm, :pipe) # Get the list of pipe indices.
+        df = WMA.get_pipe_dataframe(wm.data, wm_solution, wn, wnres, string(i))
+
+        for nw in WM.nw_ids(wm)
+            wm.solution["nw"][string(nw)]["pipe"][string(i)]["q"] = df[nw, :].flow_wntr
+        end
+    end
+end
+
+
+function _update_pump_flows!(wm::AbstractWaterModel, wn, wnres)
+    wm_solution = Dict{String, Any}("solution" => wm.solution)
+
+    for i in WM.ids(wm, :pump) # Get the list of pump indices.
+        df = WMA.get_pump_dataframe(wm.data, wm_solution, wn, wnres, string(i))
+
+        for nw in WM.nw_ids(wm)
+            wm.solution["nw"][string(nw)]["pump"][string(i)]["q"] = df[nw, :].flow_wntr
+        end
+    end
 end
 
 
