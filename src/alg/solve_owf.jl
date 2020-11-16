@@ -1,5 +1,3 @@
-import Gurobi
-
 function solve_obbt(network_path::String, obbt_optimizer; time_limit::Float64 = 3600.0)
     # Read in the original network data.
     network = WM.parse_file(network_path)
@@ -90,6 +88,16 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
 
             # Collect the current integer solution into "zero" and "one" buckets.
             vars = _get_indicator_variables_to_nw(wm, max_nw) # All relevant component status variables.
+            zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
+            one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
+
+            # If the solution is not feasible (according to a comparison with WNTR), add a no-good cut.
+            con = WM.JuMP.@build_constraint(sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
+            WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
+            num_infeasible_solutions += 1
+        elseif !_tanks_satisfy_recovery(wm_nlp, wn, wnres)
+            # Collect the current integer solution into "zero" and "one" buckets.
+            vars = _get_indicator_variables(wm) # All relevant component status variables.
             zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
             one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
 
@@ -241,15 +249,6 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
 end
 
 
-function _set_branch_priorities(wm::AbstractWaterModel)
-    for nw in WM.nw_ids(wm)
-        pump_vars = WM.var(wm, nw, :z_pump)
-        attribute = Gurobi.VariableAttribute("BranchPriority")
-        WM._MOI.set(wm.model, attribute, pump_vars[1], 3)
-    end
-end
-
-
 function _populate_solution!(cb_data, wm_cb::AbstractWaterModel, wm::AbstractWaterModel)
     for nw in WM.nw_ids(wm_cb)
         for comp_type in [:pump, :regulator, :valve]
@@ -260,6 +259,15 @@ function _populate_solution!(cb_data, wm_cb::AbstractWaterModel, wm::AbstractWat
                 wm.solution["nw"][string(nw)][string(comp_type)][string(i)]["status"] = val
             end
         end
+    end
+
+    nw_1 = sort(collect(WM.nw_ids(wm)))[1]
+
+    for (i, tank) in WM.ref(wm_cb, nw_1, :tank)
+        h_var = WM.var(wm_cb, nw_1, :h, tank["node"])
+        h_val = WM.JuMP.callback_value(cb_data, h_var)
+        p_val = h_val - WM.ref(wm_cb, nw_1, :node, tank["node"])["elevation"]
+        wm.solution["nw"][string(nw_1)]["node"][string(tank["node"])]["p"] = p_val
     end
 end
 
@@ -436,6 +444,14 @@ function _calc_valve_infeasibilities(wm::AbstractWaterModel, wn, wnres)
 
     inf[inf .< 1.0e-6] .= 0.0 # Replace small infeasibilities with zero.
     return inf # Return the matrix of valve flow infeasibilities.
+end
+
+
+function _tanks_satisfy_recovery(wm::AbstractWaterModel, wn, wnres)
+    tank_ids = WM.ids(wm, :tank) # Get the list of tank indices.
+    wm_solution = Dict{String, Any}("solution" => wm.solution)
+    dfs = WMA.get_tank_dataframe.(Ref(wm.data), Ref(wm_solution), Ref(wn), Ref(wnres), string.(tank_ids))
+    return all([dfs[k][1, :].level_wntr - 0.01 <= dfs[k][end, :].level_wntr for k in 1:length(tank_ids)])
 end
 
 
