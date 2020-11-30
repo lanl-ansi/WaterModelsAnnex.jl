@@ -112,8 +112,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
         wntr_result = WMA.simulate_wntr(wntr_network)
         num_simulations_executed += 1
 
-        # Compute the objective of the WNTR solution.
-        wntr_objective = _calc_wntr_objective(wm, wntr_result)
+        # Get infeasibilities associated with tanks
         tank_infeasibilities = _calc_tank_infeasibilities(wm, wntr_result)
 
         if sum(sum(abs.(array)) for array in values(tank_infeasibilities)) > 0.0
@@ -127,76 +126,37 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
 
             # Increase the number of infeasible solutions encountered by one.
             num_infeasible_solutions += 1
+        else
+            # Get the first network index corresponding to infeasibility.
+            min_nw = calc_first_nw_infeasibility(wm, wntr_result)
+
+            if min_nw != nothing # There is an infeasibility somewhere.
+                # If there is an infeasibility, add a no-good cut up to that network index.
+                vars = _get_indicator_variables_to_nw(wm, min_nw)
+                zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
+                one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
+
+                # If the solution is not feasible (according to a comparison with WNTR), add a no-good cut.
+                con = WM.JuMP.@build_constraint(sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
+                WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
+                num_infeasible_solutions += 1
+            else # There are no infeasibilities.
+                # Collect the current integer solution into "zero" and "one" buckets.
+                vars = _get_indicator_variables(wm) # All relevant component status variables.
+                zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
+                one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
+
+                # Compute the objectives of the relaxation and WNTR solution.
+                relaxed_objective = WM.JuMP.callback_value(cb_data, objective_var)
+                true_objective = _calc_wntr_objective(wm, wntr_result)
+
+                # Add a cut to raise the objective for the solution to the true objective.
+                bin_expr = true_objective * (length(one_vars) - sum(one_vars) + sum(zero_vars))
+                con = WM.JuMP.@build_constraint(objective_var >= true_objective - bin_expr)
+                WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
+                push!(objective_comparison_table, (relaxed_objective, true_objective))
+            end
         end
-
-        ## Calculate infeasibilities for components.
-        #tank_infeas_lb, tank_infeas_ub = _calc_tank_infeasibilities(wm_nlp, wn, wnres)
-        #node_infeas = _calc_node_infeasibilities(wm_nlp, wn, wnres)
-
-        #pipe_infeas = _calc_pipe_infeasibilities(wm_nlp, wn, wnres)
-        #pump_infeas = _calc_pump_infeasibilities(wm_nlp, wn, wnres)
-        #regulator_infeas = _calc_regulator_infeasibilities(wm_nlp, wn, wnres)
-        #short_pipe_infeas = _calc_short_pipe_infeasibilities(wm_nlp, wn, wnres)
-        #valve_infeas = _calc_valve_infeasibilities(wm_nlp, wn, wnres)
-
-    #    if sum(node_infeas) + sum(pipe_infeas) + sum(pump_infeas) + sum(regulator_infeas) +
-    #        sum(short_pipe_infeas) + sum(valve_infeas) > 0.0 # If any infeasibility exists...
-    #        # Find the index of the first time step at which infeasibility is detected.
-    #        max_nw = length(WM.nw_ids(wm_nlp))
-    #        node_nw = sum(node_infeas) > 0.0 ? findfirst(x -> x > 0.0, node_infeas')[2] : max_nw
-    #        pipe_nw = sum(pipe_infeas) > 0.0 ? findfirst(x -> x > 0.0, pipe_infeas')[2] : max_nw
-    #        pump_nw = sum(pump_infeas) > 0.0 ? findfirst(x -> x > 0.0, pump_infeas')[2] : max_nw
-
-    #        regulator_nw = sum(regulator_infeas) > 0.0 ?
-    #            findfirst(x -> x > 0.0, regulator_infeas')[2] : max_nw
-
-    #        short_pipe_nw = sum(short_pipe_infeas) > 0.0 ?
-    #            findfirst(x -> x > 0.0, short_pipe_infeas')[2] : max_nw
-
-    #        valve_nw = sum(valve_infeas) > 0.0 ? findfirst(x -> x > 0.0, valve_infeas')[2] : max_nw
-    #        min_nw = Int(min(node_nw, pipe_nw, pump_nw, regulator_nw, short_pipe_nw, valve_nw))
-
-    #        #println(tank_infeas_lb)
-    #        #println(tank_infeas_ub)
-
-    #        #println(node_infeas)
-    #        #println(pipe_infeas)
-    #        #println(pump_infeas)
-    #        #println(regulator_infeas)
-    #        #println(short_pipe_infeas)
-    #        #println(valve_infeas)
-
-    #        # Collect the current integer solution into "zero" and "one" buckets.
-    #        vars = _get_indicator_variables_to_nw(wm, min_nw) # All relevant component status variables.
-    #        zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
-    #        one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
-
-    #        # If the solution is not feasible (according to a comparison with WNTR), add a no-good cut.
-    #        con = WM.JuMP.@build_constraint(sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
-    #        WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
-    #        num_infeasible_solutions += 1
-    #    elseif sum(tank_infeas_lb) + sum(tank_infeas_ub) > 0.0
-    #        # Collect the current integer solution into "zero" and "one" buckets.
-    #        vars = _get_pump_indicators(wm) # All relevant component status variables.
-    #        zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
-
-    #        # If the solution is not feasible (according to a comparison with WNTR), add a no-good cut.
-    #        con = WM.JuMP.@build_constraint(sum(zero_vars) >= 1.0)
-    #        WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
-    #        num_infeasible_solutions += 1
-    #    else
-    #        # Collect the current integer solution into "zero" and "one" buckets.
-    #        vars = _get_indicator_variables(wm) # All relevant component status variables.
-    #        zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
-    #        one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
-
-    #        relaxed_objective = WM.JuMP.callback_value(cb_data, objective_var)
-    #        true_objective = _calc_wntr_objective(wm_nlp, wn, wnres)
-    #        bin_expr = true_objective * (length(one_vars) - sum(one_vars) + sum(zero_vars))
-    #        con = WM.JuMP.@build_constraint(objective_var >= true_objective - bin_expr)
-    #        WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
-    #        push!(objective_comparison_table, (relaxed_objective, true_objective))
-    #    end
     end
 
     # Register the lazy cut callback with the JuMP modeling object.
@@ -329,8 +289,6 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     result["objective_comparison"] = objective_comparison_table
     result["num_infeasible_solutions"] = num_infeasible_solutions
 
-    println(num_simulations_executed)
-
     # Return the optimization result dictionary.
     return result
 end
@@ -397,35 +355,9 @@ function _get_indicator_variables(wm::AbstractWaterModel)
 end
 
 
-function _add_owf_feasibility_cut!(wm::AbstractWaterModel)
-    vars = _get_indicator_variables(wm)
-    zero_vars = filter(x -> round(WM.JuMP.value(x)) == 0.0, vars)
-    one_vars = filter(x -> round(WM.JuMP.value(x)) == 1.0, vars)
-    WM.JuMP.@constraint(wm.model, sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
-end
-
-
 function _simulate_solution(wm::AbstractWaterModel, network_path::String)
     wm_solution = Dict{String, Any}("solution" => wm.solution)
     return WMA.simulate(wm.data, wm_solution, network_path)
-end
-
-
-function _calc_node_infeasibilities(wm::AbstractWaterModel, wn, wnres)
-    node_ids = WM.ids(wm, :node) # Get the list of node indices.
-    wm_solution = Dict{String, Any}("solution" => wm.solution)
-    dfs = WMA.get_node_dataframe.(Ref(wm.data), Ref(wm_solution), Ref(wn), Ref(wnres), string.(node_ids))
-    inf = ones(Float64, length(WM.nw_ids(wm)), length(node_ids))
-
-    for nw in WM.nw_ids(wm) # Loop over all subnetworks of the multinetwork.
-        lbs = [get(WM.ref(wm, nw, :node, i), "h_min", -Inf) for i in node_ids]
-        ubs = [get(WM.ref(wm, nw, :node, i), "h_max", Inf) for i in node_ids]
-        vals = [dfs[k][nw, :].head_wntr for k in 1:length(node_ids)]
-        inf[nw, :] = max.(max.(lbs .- vals, 0.0), max.(vals .- ubs, 0.0))
-    end
-
-    inf[inf .< 1.0e-3] .= 0.0 # Replace small infeasibilities with zero.
-    return inf # Return the matrix of node head infeasibilities.
 end
 
 
@@ -455,106 +387,6 @@ function _update_pump_flows!(wm::AbstractWaterModel, wn, wnres)
 end
 
 
-function _calc_pipe_infeasibilities(wm::AbstractWaterModel, wn, wnres)
-    pipe_ids = WM.ids(wm, :pipe) # Get the list of pipe indices.
-    wm_solution = Dict{String, Any}("solution" => wm.solution)
-    dfs = WMA.get_pipe_dataframe.(Ref(wm.data), Ref(wm_solution), Ref(wn), Ref(wnres), string.(pipe_ids))
-    inf = ones(Float64, length(WM.nw_ids(wm)), length(pipe_ids))
-
-    for nw in WM.nw_ids(wm) # Loop over all subnetworks of the multinetwork.
-        lbs = [get(WM.ref(wm, nw, :pipe, i), "q_min", -Inf) for i in pipe_ids]
-        ubs = [get(WM.ref(wm, nw, :pipe, i), "q_max", Inf) for i in pipe_ids]
-        vals = [dfs[k][nw, :].flow_wntr for k in 1:length(pipe_ids)]
-        inf[nw, :] = max.(max.(lbs .- vals, 0.0), max.(vals .- ubs, 0.0))
-    end
-
-    inf[inf .< 1.0e-6] .= 0.0 # Replace small infeasibilities with zero.
-    return inf # Return the matrix of pipe flow infeasibilities.
-end
-
-
-function _calc_pump_infeasibilities(wm::AbstractWaterModel, wn, wnres)
-    pump_ids = WM.ids(wm, :pump) # Get the list of pump indices.
-    wm_solution = Dict{String, Any}("solution" => wm.solution)
-    dfs = WMA.get_pump_dataframe.(Ref(wm.data), Ref(wm_solution), Ref(wn), Ref(wnres), string.(pump_ids))
-    inf = ones(Float64, length(WM.nw_ids(wm)), length(pump_ids))
-
-    for nw in WM.nw_ids(wm) # Loop over all subnetworks of the multinetwork.
-        lbs = [get(WM.ref(wm, nw, :pump, i), "q_min", -Inf) for i in pump_ids]
-        ubs = [get(WM.ref(wm, nw, :pump, i), "q_max", Inf) for i in pump_ids]
-        vals = [dfs[k][nw, :].flow_wntr for k in 1:length(pump_ids)]
-        inf[nw, :] = max.(max.(lbs .- vals, 0.0), max.(vals .- ubs, 0.0))
-    end
-
-    inf[inf .< 1.0e-6] .= 0.0 # Replace small infeasibilities with zero.
-    return inf # Return the matrix of pump flow infeasibilities.
-end
-
-
-function _calc_regulator_infeasibilities(wm::AbstractWaterModel, wn, wnres)
-    regulator_ids = WM.ids(wm, :regulator) # Get the list of regulator indices.
-    wm_solution = Dict{String, Any}("solution" => wm.solution)
-    dfs = WMA.get_regulator_dataframe.(Ref(wm.data), Ref(wm_solution), Ref(wn), Ref(wnres), string.(regulator_ids))
-    inf = ones(Float64, length(WM.nw_ids(wm)), length(regulator_ids))
-
-    for nw in WM.nw_ids(wm) # Loop over all subnetworks of the multinetwork.
-        lbs = [get(WM.ref(wm, nw, :regulator, i), "q_min", -Inf) for i in regulator_ids]
-        ubs = [get(WM.ref(wm, nw, :regulator, i), "q_max", Inf) for i in regulator_ids]
-        vals = [dfs[k][nw, :].flow_wntr for k in 1:length(regulator_ids)]
-        inf[nw, :] = max.(max.(lbs .- vals, 0.0), max.(vals .- ubs, 0.0))
-    end
-
-    inf[inf .< 1.0e-6] .= 0.0 # Replace small infeasibilities with zero.
-    return inf # Return the matrix of regulator flow infeasibilities.
-end
-
-
-function _calc_short_pipe_infeasibilities(wm::AbstractWaterModel, wn, wnres)
-    short_pipe_ids = WM.ids(wm, :short_pipe) # Get the list of short_pipe indices.
-    wm_solution = Dict{String, Any}("solution" => wm.solution)
-    dfs = WMA.get_short_pipe_dataframe.(Ref(wm.data), Ref(wm_solution), Ref(wn), Ref(wnres), string.(short_pipe_ids))
-    inf = ones(Float64, length(WM.nw_ids(wm)), length(short_pipe_ids))
-
-    for nw in WM.nw_ids(wm) # Loop over all subnetworks of the multinetwork.
-        lbs = [get(WM.ref(wm, nw, :short_pipe, i), "q_min", -Inf) for i in short_pipe_ids]
-        ubs = [get(WM.ref(wm, nw, :short_pipe, i), "q_max", Inf) for i in short_pipe_ids]
-        vals = [dfs[k][nw, :].flow_wntr for k in 1:length(short_pipe_ids)]
-        inf[nw, :] = max.(max.(lbs .- vals, 0.0), max.(vals .- ubs, 0.0))
-    end
-
-    inf[inf .< 1.0e-6] .= 0.0 # Replace small infeasibilities with zero.
-    return inf # Return the matrix of short_pipe flow infeasibilities.
-end
-
-
-function _calc_valve_infeasibilities(wm::AbstractWaterModel, wn, wnres)
-    valve_ids = WM.ids(wm, :valve) # Get the list of valve indices.
-    wm_solution = Dict{String, Any}("solution" => wm.solution)
-    dfs = WMA.get_valve_dataframe.(Ref(wm.data), Ref(wm_solution), Ref(wn), Ref(wnres), string.(valve_ids))
-    inf = ones(Float64, length(WM.nw_ids(wm)), length(valve_ids))
-
-    for nw in WM.nw_ids(wm) # Loop over all subnetworks of the multinetwork.
-        lbs = [get(WM.ref(wm, nw, :valve, i), "q_min", -Inf) for i in valve_ids]
-        ubs = [get(WM.ref(wm, nw, :valve, i), "q_max", Inf) for i in valve_ids]
-        vals = [dfs[k][nw, :].flow_wntr for k in 1:length(valve_ids)]
-        inf[nw, :] = max.(max.(lbs .- vals, 0.0), max.(vals .- ubs, 0.0))
-    end
-
-    inf[inf .< 1.0e-6] .= 0.0 # Replace small infeasibilities with zero.
-    return inf # Return the matrix of valve flow infeasibilities.
-end
-
-
-
-
-function _tanks_satisfy_recovery(wm::AbstractWaterModel, wn, wnres)
-    tank_ids = WM.ids(wm, :tank) # Get the list of tank indices.
-    wm_solution = Dict{String, Any}("solution" => wm.solution)
-    dfs = WMA.get_tank_dataframe.(Ref(wm.data), Ref(wm_solution), Ref(wn), Ref(wnres), string.(tank_ids))
-    return all([dfs[k][1, :].level_wntr - 0.01 <= dfs[k][end, :].level_wntr for k in 1:length(tank_ids)])
-end
-
-
 function _set_van_zyl_statuses(wm::AbstractWaterModel)
     statuses = Dict{String, Array}("pmp1" => [0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1],
                                    "pmp2" => [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 0],
@@ -571,6 +403,75 @@ function _set_van_zyl_statuses(wm::AbstractWaterModel)
             WM._fix_indicator_variable(z_pump, pump, "z")
         end
     end
+end
+
+
+function _calc_node_infeasibilities(wm::AbstractWaterModel, wntr_result::WMA.PyCall.PyObject)
+    network_ids = sort(collect(WM.nw_ids(wm)))
+    infeasibilities = Dict(i => zeros(length(network_ids)) for i in WM.ids(wm, :node))
+
+    for (i, node) in WM.ref(wm, :node)
+        node_id = string(i) # Index of the node corresponding to the node.
+        head = WMA.PyCall.getproperty(wntr_result.node["head"], node_id).values[1:end-1]
+        h_min = [get(WM.ref(wm, nw, :node, i), "h_min", -Inf) for nw in network_ids]
+        h_max = [get(WM.ref(wm, nw, :node, i), "h_max", Inf) for nw in network_ids]
+        infeasibilities[i] = min.(head .- h_min, 0.0) + max.(head .- h_max, 0.0)
+    end
+
+    return infeasibilities
+end
+
+
+function calc_first_nw_infeasibility(wm::AbstractWaterModel, wntr_result::WMA.PyCall.PyObject)
+    node_infeasibilities = _calc_node_infeasibilities(wm, wntr_result)
+    node_nw = _get_first_nw_infeasibility(wm, node_infeasibilities)
+
+    pipe_infeasibilities = _calc_edge_infeasibilities(wm, wntr_result, :pipe)
+    pipe_nw = _get_first_nw_infeasibility(wm, pipe_infeasibilities)
+    pump_infeasibilities = _calc_edge_infeasibilities(wm, wntr_result, :pump)
+    pump_nw = _get_first_nw_infeasibility(wm, pump_infeasibilities)
+
+    valve_infeasibilities = _calc_edge_infeasibilities(wm, wntr_result, :valve)
+    valve_nw = _get_first_nw_infeasibility(wm, valve_infeasibilities)
+    short_pipe_infeasibilities = _calc_edge_infeasibilities(wm, wntr_result, :short_pipe)
+    short_pipe_nw = _get_first_nw_infeasibility(wm, short_pipe_infeasibilities)
+    regulator_infeasibilities = _calc_edge_infeasibilities(wm, wntr_result, :regulator)
+    regulator_nw = _get_first_nw_infeasibility(wm, regulator_infeasibilities)
+
+    min_nws = [node_nw, pipe_nw, pump_nw, valve_nw, short_pipe_nw, regulator_nw]
+    filtered_array = Int64.(filter(x -> x != nothing, min_nws))
+    return length(filtered_array) > 0 ? minimum(filtered_array) : nothing
+end
+
+
+function _get_first_nw_infeasibility(wm::AbstractWaterModel, infeasibilities::Dict{Int, Array{Float64, 1}})
+    network_ids = sort(collect(WM.nw_ids(wm)))
+    nw = nothing # Index of the first infeasibility.
+
+    for (index, array) in infeasibilities
+        nw_index = findfirst(x -> x > 0.0, abs.(array))
+        first_nw = nw_index == nothing ? nothing : network_ids[nw_index]
+        nw = first_nw == nothing ? nw : (nw == nothing ? first_nw : min(nw, first_nw))
+    end
+
+    return nw
+end
+
+
+function _calc_edge_infeasibilities(wm::AbstractWaterModel, wntr_result::WMA.PyCall.PyObject, sym::Symbol)
+    network_ids = sort(collect(WM.nw_ids(wm)))
+    infeasibilities = Dict(i => zeros(length(network_ids)) for i in WM.ids(wm, sym))
+
+    for (i, comp) in WM.ref(wm, sym)
+        comp_id = string(sym) * string(i) # String index of the pipe corresponding.
+        flow = WMA.PyCall.getproperty(wntr_result.link["flowrate"], comp_id).values[1:end-1]
+        q_min = [get(WM.ref(wm, nw, sym, i), "q_min", -Inf) for nw in network_ids]
+        q_max = [get(WM.ref(wm, nw, sym, i), "q_max", Inf) for nw in network_ids]
+        infeasibilities[i] = min.(flow .- q_min, 0.0) + max.(flow .- q_max, 0.0)
+        infeasibilities[i][abs.(infeasibilities[i]) .< 1.0e-6] .= 0.0
+    end
+
+    return infeasibilities
 end
 
 
