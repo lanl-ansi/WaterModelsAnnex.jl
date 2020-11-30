@@ -1,6 +1,8 @@
 module WaterModelsAnnex
 
 using WaterModels
+
+import LightGraphs
 import WaterModelsAnalytics
 
 const WM = WaterModels
@@ -21,6 +23,10 @@ function silence()
     WM.Memento.setlevel!(Memento.getlogger(WM), "error")
 end
 
+include("util/graph.jl")
+
+include("alg/compute_source_pumps.jl")
+include("alg/pump_volume_cuts.jl")
 include("alg/solve_owf.jl")
 
 #include("alg/ne-add_tasseff.jl")
