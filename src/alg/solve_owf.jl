@@ -147,7 +147,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
                 one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
 
                 # Compute the objectives of the relaxation and WNTR solution.
-                objective_var = JuMP.variable_by_name(wm.model, "obj_aux")
+                objective_var = WM.JuMP.variable_by_name(wm.model, "obj_aux")
                 relaxed_objective = WM.JuMP.callback_value(cb_data, objective_var)
                 true_objective = _calc_wntr_objective(wm, wntr_result)
 
