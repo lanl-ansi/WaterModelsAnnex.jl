@@ -123,7 +123,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
         # Get infeasibilities associated with tanks
         tank_infeasibilities = _calc_tank_infeasibilities(wm, wntr_result)
 
-        if sum(sum(abs.(array)) for array in values(tank_infeasibilities)) > 0.0
+        if length(tank_infeasibilities) > 0
             # Collect the current integer solution into "zero" and "one" buckets.
             vars = _get_pump_indicators(wm) # All relevant component status variables.
             zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
