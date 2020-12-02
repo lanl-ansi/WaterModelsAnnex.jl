@@ -104,6 +104,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     num_infeasible_solutions = 0 # Number of integer *infeasible* solutions.
     objective_comparison_table = [] # Compares relaxed versus true objectives.
     num_simulations_executed = 0
+    infeasibility_map = Dict{Int64, Any}()
 
     function lazy_cut_callback(cb_data) # Define the lazy cut callback function.
         # Populate the solution of wm_nlp to use in the feasibility check.
@@ -111,6 +112,13 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
         WMA.update_wntr_controls(wntr_network, wm.data, wm_nlp.solution, Float64(wm.data["time_step"]))
         wntr_result = WMA.simulate_wntr(wntr_network)
         num_simulations_executed += 1
+
+        # Update the map of infeasibilities.
+        infeasibilities = _calc_infeasibilities(wm, wntr_result)
+
+        if length(infeasibilities) > 0
+            infeasibility_map[num_simulations_executed] = infeasibilities
+        end
 
         # Get infeasibilities associated with tanks
         tank_infeasibilities = _calc_tank_infeasibilities(wm, wntr_result)
@@ -289,6 +297,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Save relevant algorithm metadata within the result object.
     result["objective_comparison"] = objective_comparison_table
     result["num_infeasible_solutions"] = num_infeasible_solutions
+    result["infeasibilities"] = infeasibility_map
 
     # Return the optimization result dictionary.
     return result
@@ -389,8 +398,8 @@ end
 
 
 function _set_van_zyl_statuses(wm::AbstractWaterModel)
-    statuses = Dict{String, Array}("pmp1" => [0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1],
-                                   "pmp2" => [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 0],
+    statuses = Dict{String, Array}("pmp2" => [0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1],
+                                   "pmp1" => [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 0],
                                    "pmp6" => [0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1])
 
     for (nw, nw_ref) in WM.nws(wm)
@@ -419,7 +428,20 @@ function _calc_node_infeasibilities(wm::AbstractWaterModel, wntr_result::WMA.PyC
         infeasibilities[i] = min.(head .- h_min, 0.0) + max.(head .- h_max, 0.0)
     end
 
-    return infeasibilities
+    return filter(x -> any(y -> y != 0.0, x.second), infeasibilities)
+end
+
+
+function _calc_infeasibilities(wm::AbstractWaterModel, wntr_result::WMA.PyCall.PyObject)
+    infeasibilities = Dict{String, Any}()
+    infeasibilities["node"] = _calc_node_infeasibilities(wm, wntr_result)
+    infeasibilities["tank"] = _calc_tank_infeasibilities(wm, wntr_result)
+    infeasibilities["pipe"] = _calc_edge_infeasibilities(wm, wntr_result, :pipe)
+    infeasibilities["pump"] = _calc_edge_infeasibilities(wm, wntr_result, :pump)
+    infeasibilities["valve"] = _calc_edge_infeasibilities(wm, wntr_result, :valve)
+    infeasibilities["short_pipe"] = _calc_edge_infeasibilities(wm, wntr_result, :short_pipe)
+    infeasibilities["regulator"] = _calc_edge_infeasibilities(wm, wntr_result, :regulator)
+    return filter(x -> length(x.second) > 0, infeasibilities)
 end
 
 
@@ -472,7 +494,7 @@ function _calc_edge_infeasibilities(wm::AbstractWaterModel, wntr_result::WMA.PyC
         infeasibilities[i][abs.(infeasibilities[i]) .< 1.0e-6] .= 0.0
     end
 
-    return infeasibilities
+    return filter(x -> any(y -> y != 0.0, x.second), infeasibilities)
 end
 
 
@@ -492,7 +514,7 @@ function _calc_tank_infeasibilities(wm::AbstractWaterModel, wntr_result::WMA.PyC
         infeasibilities[tank_id][end] = min(0.0, head[end] - head[1])
     end
 
-    return infeasibilities
+    return filter(x -> any(y -> y != 0.0, x.second), infeasibilities)
 end
 
 
@@ -505,6 +527,12 @@ function _calc_wntr_objective(wm::AbstractWaterModel, wntr_result::WMA.PyCall.Py
         flow = WMA.PyCall.getproperty(wntr_result.link["flowrate"], i).values[1:end-1]
         status = WMA.PyCall.getproperty(wntr_result.link["status"], i).values[1:end-1]
         energy = WM._calc_pump_energy.(Ref(wm), Ref(wm.cnw), Ref(pump_id), Float64.(flow))
+
+        #headloss = WMA.PyCall.getproperty(wntr_result.link["headloss"], i).values[1:end-1]
+        #head_i = WMA.PyCall.getproperty(wntr_result.node["head"], string(pump["node_fr"])).values[1:end-1]
+        #head_j = WMA.PyCall.getproperty(wntr_result.node["head"], string(pump["node_to"])).values[1:end-1]
+        #coeff = WM._get_function_from_head_curve(pump["head_curve"])
+
         wntr_objective_value += sum(round.(status) .* energy .* price)
     end
 
