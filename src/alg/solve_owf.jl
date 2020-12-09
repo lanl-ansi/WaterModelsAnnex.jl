@@ -5,8 +5,8 @@ function solve_obbt(network_path::String, obbt_optimizer; time_limit::Float64 = 
     # Tighten bounds of variables in the network.
     WM.run_obbt_owf!(
         network, obbt_optimizer; model_type = LRDWaterModel,
-        solve_relaxed = false, time_limit = time_limit,
-        ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10))
+        solve_relaxed = false, time_limit = time_limit, max_iter = 100,
+        ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10, :use_best_efficiency_form => true))
 
     # Get tightened network data.
     return network
@@ -23,7 +23,7 @@ end
 
 function compute_pairwise_cuts(network::Dict{String, Any}, obbt_optimizer)
     # Get pairwise cutting planes from the network-relaxed problem.
-    ext = Dict{Symbol, Any}(:pipe_breakpoints => 10, :pump_breakpoints => 10)
+    ext = Dict{Symbol, Any}(:pipe_breakpoints => 10, :pump_breakpoints => 10, :use_best_efficiency_form => true)
     wm = instantiate_model(network, LRDWaterModel, build_owf; ext = ext)
     WM.JuMP.set_optimizer(wm.model, obbt_optimizer)
     problem_sets = WM._get_pairwise_problem_sets(wm; nw = wm.cnw)
@@ -34,7 +34,7 @@ end
 function construct_owf_model(network::Dict{String, Any}, owf_optimizer)
     # Construct the OWF model.
     network_mn = WM.make_multinetwork(network)
-    ext = Dict(:pipe_breakpoints => 5, :pump_breakpoints => 5)
+    ext = Dict(:pipe_breakpoints => 1, :pump_breakpoints => 5, :use_best_efficiency_form => true)
     wm = WM.instantiate_model(network_mn, LRDWaterModel, build_mn_owf; ext = ext)
 
     # Constrain an auxiliary objective variable by the objective function.
@@ -50,6 +50,10 @@ function construct_owf_model(network::Dict{String, Any}, owf_optimizer)
     # Set the pump statuses for the Van Zyl network.
     #_set_van_zyl_statuses(wm)
 
+    #WM._relax_last_indicator_variables!(wm; last_num_steps = 24)
+    #WM._relax_all_direction_variables!(wm)
+    #WM.relax_all_binary_variables!(wm)
+
     # Return the WaterModels object.
     return wm
 end
@@ -58,9 +62,11 @@ end
 function construct_relaxed_owf_model(network::Dict{String, Any}, nlp_optimizer)
     # Construct the relaxed OWF model.
     network_mn = WM.make_multinetwork(network)
-    ext = Dict(:pipe_breakpoints => 5, :pump_breakpoints => 5)
-    wm = WM.instantiate_model(network_mn, LRDWaterModel, build_mn_owf; ext = ext)
+    wm = WM.instantiate_model(network_mn, NCWaterModel, build_mn_owf)
     WM.relax_all_binary_variables!(wm)
+
+    # Set a feasibility-only objective.
+    WM.JuMP.@objective(wm.model, WM._MOI.FEASIBILITY_SENSE, 0.0)
 
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, nlp_optimizer)
@@ -138,7 +144,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
             # Get the first network index corresponding to infeasibility.
             min_nw = calc_first_nw_infeasibility(wm, wntr_result)
 
-            if min_nw != nothing # There is an infeasibility somewhere.
+            if min_nw !== nothing # There is an infeasibility somewhere.
                 # If there is an infeasibility, add a no-good cut up to that network index.
                 vars = _get_indicator_variables_to_nw(wm, min_nw)
                 zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
@@ -149,6 +155,11 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
                 WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
                 num_infeasible_solutions += 1
             else # There are no infeasibilities.
+                #_update_nlp_model!(cb_data, wm, wm_nlp)
+                #WM.JuMP.optimize!(wm_nlp.model)
+                #nlp_status = WM.JuMP.termination_status(wm_nlp.model)
+                #println(nlp_status)
+
                 # Collect the current integer solution into "zero" and "one" buckets.
                 vars = _get_indicator_variables(wm) # All relevant component status variables.
                 zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
@@ -168,8 +179,8 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
         end
     end
 
-    # Register the lazy cut callback with the JuMP modeling object.
-    WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), lazy_cut_callback)
+    ## Register the lazy cut callback with the JuMP modeling object.
+    #WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), lazy_cut_callback)
 
     #function user_cut_callback(cb_data) # Define the user cut callback function.
     #    for nw in WM.nw_ids(wm)
@@ -327,6 +338,20 @@ function _populate_solution!(cb_data, wm_cb::AbstractWaterModel, wm::AbstractWat
 end
 
 
+function _update_nlp_model!(cb_data, wm_cb::AbstractWaterModel, wm::AbstractWaterModel)
+    for nw in WM.nw_ids(wm_cb)
+        for comp_type in [:pump, :regulator, :valve]
+            for (i, comp) in WM.ref(wm_cb, nw, comp_type)
+                var_sym = Symbol("z_" * string(comp_type))
+                var_cb = WM.var(wm_cb, nw, var_sym, i)
+                val_cb = round(WM.JuMP.callback_value(cb_data, var_cb))
+                WM.JuMP.fix(WM.var(wm, nw, var_sym, i), val_cb; force = true)
+            end
+        end
+    end
+end
+
+
 function _get_indicator_variables_to_nw(wm::AbstractWaterModel, nw_last::Int)
     vars = Array{WM.JuMP.VariableRef, 1}()
     network_ids = sort(collect(WM.nw_ids(wm)))[1:nw_last]
@@ -398,8 +423,8 @@ end
 
 
 function _set_van_zyl_statuses(wm::AbstractWaterModel)
-    statuses = Dict{String, Array}("pmp2" => [0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1],
-                                   "pmp1" => [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 0],
+    statuses = Dict{String, Array}("pmp1" => [0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1],
+                                   "pmp2" => [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 0],
                                    "pmp6" => [0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1])
 
     for (nw, nw_ref) in WM.nws(wm)
@@ -423,8 +448,8 @@ function _calc_node_infeasibilities(wm::AbstractWaterModel, wntr_result::WMA.PyC
     for (i, node) in WM.ref(wm, :node)
         node_id = string(i) # Index of the node corresponding to the node.
         head = WMA.PyCall.getproperty(wntr_result.node["head"], node_id).values[1:end-1]
-        h_min = [get(WM.ref(wm, nw, :node, i), "h_min", -Inf) for nw in network_ids]
-        h_max = [get(WM.ref(wm, nw, :node, i), "h_max", Inf) for nw in network_ids]
+        h_min = [get(WM.ref(wm, nw, :node, i), "head_min", -Inf) for nw in network_ids]
+        h_max = [get(WM.ref(wm, nw, :node, i), "head_max", Inf) for nw in network_ids]
         infeasibilities[i] = min.(head .- h_min, 0.0) + max.(head .- h_max, 0.0)
     end
 
@@ -462,7 +487,7 @@ function calc_first_nw_infeasibility(wm::AbstractWaterModel, wntr_result::WMA.Py
     regulator_nw = _get_first_nw_infeasibility(wm, regulator_infeasibilities)
 
     min_nws = [node_nw, pipe_nw, pump_nw, valve_nw, short_pipe_nw, regulator_nw]
-    filtered_array = Int64.(filter(x -> x != nothing, min_nws))
+    filtered_array = Int64.(filter(x -> x !== nothing, min_nws))
     return length(filtered_array) > 0 ? minimum(filtered_array) : nothing
 end
 
@@ -473,8 +498,8 @@ function _get_first_nw_infeasibility(wm::AbstractWaterModel, infeasibilities::Di
 
     for (index, array) in infeasibilities
         nw_index = findfirst(x -> x > 0.0, abs.(array))
-        first_nw = nw_index == nothing ? nothing : network_ids[nw_index]
-        nw = first_nw == nothing ? nw : (nw == nothing ? first_nw : min(nw, first_nw))
+        first_nw = nw_index === nothing ? nothing : network_ids[nw_index]
+        nw = first_nw === nothing ? nw : (nw === nothing ? first_nw : min(nw, first_nw))
     end
 
     return nw
@@ -488,8 +513,8 @@ function _calc_edge_infeasibilities(wm::AbstractWaterModel, wntr_result::WMA.PyC
     for (i, comp) in WM.ref(wm, sym)
         comp_id = string(sym) * string(i) # String index of the pipe corresponding.
         flow = WMA.PyCall.getproperty(wntr_result.link["flowrate"], comp_id).values[1:end-1]
-        q_min = [get(WM.ref(wm, nw, sym, i), "q_min", -Inf) for nw in network_ids]
-        q_max = [get(WM.ref(wm, nw, sym, i), "q_max", Inf) for nw in network_ids]
+        q_min = [get(WM.ref(wm, nw, sym, i), "flow_min", -Inf) for nw in network_ids]
+        q_max = [get(WM.ref(wm, nw, sym, i), "flow_max", Inf) for nw in network_ids]
         infeasibilities[i] = min.(flow .- q_min, 0.0) + max.(flow .- q_max, 0.0)
         infeasibilities[i][abs.(infeasibilities[i]) .< 1.0e-6] .= 0.0
     end
@@ -507,8 +532,8 @@ function _calc_tank_infeasibilities(wm::AbstractWaterModel, wntr_result::WMA.PyC
         head = WMA.PyCall.getproperty(wntr_result.node["head"], node_id).values[1:end-1]
         elevation = [WM.ref(wm, nw, :node, tank["node"])["elevation"] for nw in network_ids]
 
-        h_min = [get(WM.ref(wm, nw, :node, tank["node"]), "h_min", -Inf) for nw in network_ids]
-        h_max = [get(WM.ref(wm, nw, :node, tank["node"]), "h_max", Inf) for nw in network_ids]
+        h_min = [get(WM.ref(wm, nw, :node, tank["node"]), "head_min", -Inf) for nw in network_ids]
+        h_max = [get(WM.ref(wm, nw, :node, tank["node"]), "head_max", Inf) for nw in network_ids]
 
         infeasibilities[tank_id] = min.(head .- h_min, 0.0) + max.(head .- h_max, 0.0)
         infeasibilities[tank_id][end] = min(0.0, head[end] - head[1])

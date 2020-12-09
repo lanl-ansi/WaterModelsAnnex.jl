@@ -21,7 +21,7 @@ function _sum_remaining_demands(wm::WM.AbstractWaterModel, nws::Array{Int64, 1})
 
     for nw in nws
         expr += sum(WM.var(wm, nw, :q_demand)) # Sum over variable, dispatchable demands.
-        expr += sum(x["flow_rate"] for (i, x) in WM.ref(wm, nw, :nondispatchable_demand))
+        expr += sum(x["flow_nominal"] for (i, x) in WM.ref(wm, nw, :nondispatchable_demand))
     end
 
     return expr
