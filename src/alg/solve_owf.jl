@@ -4,38 +4,49 @@ function solve_obbt(network_path::String, obbt_optimizer; time_limit::Float64 = 
 
     # Tighten bounds of variables in the network.
     WM.run_obbt_owf!(
-        network, obbt_optimizer; model_type = LRDWaterModel,
+        network, obbt_optimizer; model_type = PWLRDWaterModel,
         solve_relaxed = false, time_limit = time_limit, max_iter = 100,
-        ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10, :use_best_efficiency_form => true))
-
+        ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10))
+    
     # Get tightened network data.
     return network
 end
 
 
-function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_optimizer)
+function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_optimizer; kwargs...)
     # Tighten the bounds in the network.
     network = solve_obbt(network_path, obbt_optimizer)
-    result = solve_owf(network_path, network, obbt_optimizer, owf_optimizer, nlp_optimizer)
+    result = solve_owf(network_path, network, obbt_optimizer, owf_optimizer, nlp_optimizer; kwargs...)
     return result
 end
 
 
 function compute_pairwise_cuts(network::Dict{String, Any}, obbt_optimizer)
+    # Relax the network.    
+    WaterModels._relax_network!(network)
+
     # Get pairwise cutting planes from the network-relaxed problem.
-    ext = Dict{Symbol, Any}(:pipe_breakpoints => 10, :pump_breakpoints => 10, :use_best_efficiency_form => true)
-    wm = instantiate_model(network, LRDWaterModel, build_owf; ext = ext)
+    ext = Dict{Symbol, Any}(:pipe_breakpoints => 10, :pump_breakpoints => 10)
+    wm = instantiate_model(network, PWLRDWaterModel, build_owf; ext = ext)
     WM.JuMP.set_optimizer(wm.model, obbt_optimizer)
     problem_sets = WM._get_pairwise_problem_sets(wm; nw = wm.cnw)
-    return WM._compute_pairwise_cuts!(wm, problem_sets)
+    cuts = WM._compute_pairwise_cuts!(wm, problem_sets)
+
+    # Unrelax the network.
+    WaterModels._fix_demands!(network)
+    WaterModels._fix_tanks!(network)
+    WaterModels._fix_reservoirs!(network)
+
+    # Return the data structure comprising cuts.
+    return cuts
 end
 
 
 function construct_owf_model(network::Dict{String, Any}, owf_optimizer)
     # Construct the OWF model.
     network_mn = WM.make_multinetwork(network)
-    ext = Dict(:pipe_breakpoints => 1, :pump_breakpoints => 5, :use_best_efficiency_form => true)
-    wm = WM.instantiate_model(network_mn, LRDWaterModel, build_mn_owf; ext = ext)
+    ext = Dict(:pipe_breakpoints => 3, :pump_breakpoints => 3)
+    wm = WM.instantiate_model(network_mn, PWLRDWaterModel, build_mn_owf; ext = ext)
 
     # Constrain an auxiliary objective variable by the objective function.
     objective_function = WM.JuMP.objective_function(wm.model)
@@ -62,7 +73,7 @@ end
 function construct_relaxed_owf_model(network::Dict{String, Any}, nlp_optimizer)
     # Construct the relaxed OWF model.
     network_mn = WM.make_multinetwork(network)
-    wm = WM.instantiate_model(network_mn, NCWaterModel, build_mn_owf)
+    wm = WM.instantiate_model(network_mn, PWLRDWaterModel, build_mn_owf)
     WM.relax_all_binary_variables!(wm)
 
     # Set a feasibility-only objective.
@@ -95,16 +106,18 @@ function _get_lazy_cut_callback(wm::AbstractWaterModel)
 end
 
 
-function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer, nlp_optimizer)
+function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer, nlp_optimizer; use_pairwise_cuts::Bool = true)
     wm = construct_owf_model(network, owf_optimizer)
-    pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
-    add_pairwise_cuts(wm, pairwise_cuts)
 
-    #lazy_cut_callback = _get_lazy_cut_callback(wm)
+    if use_pairwise_cuts
+        pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
+        add_pairwise_cuts(wm, pairwise_cuts)
+    end
+
     wntr_network = WMA.initialize_wntr_network(wm.data)
 
     # Solve the convex, continuously-relaxed optimal water flow problem.
-    wm_nlp = construct_relaxed_owf_model(network, nlp_optimizer)
+    wm_nlp = construct_relaxed_owf_model(network, obbt_optimizer)
     nlp_result = WM.optimize_model!(wm_nlp)
 
     num_infeasible_solutions = 0 # Number of integer *infeasible* solutions.
@@ -170,6 +183,8 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
                 relaxed_objective = WM.JuMP.callback_value(cb_data, objective_var)
                 true_objective = _calc_wntr_objective(wm, wntr_result)
 
+                println(relaxed_objective, " ", true_objective)
+
                 # Add a cut to raise the objective for the solution to the true objective.
                 bin_expr = true_objective * (length(one_vars) - sum(one_vars) + sum(zero_vars))
                 con = WM.JuMP.@build_constraint(objective_var >= true_objective - bin_expr)
@@ -179,128 +194,128 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
         end
     end
 
-    ## Register the lazy cut callback with the JuMP modeling object.
+    ##function user_cut_callback(cb_data) # Define the user cut callback function.
+    ##    for nw in WM.nw_ids(wm)
+    ##        exponent = WM.ref(wm, nw, :alpha)
+    ##        pipe_ids = collect(WM.ids(wm, nw, :pipe))
+    ##        L = [WM.ref(wm, nw, :pipe, i)["length"] for i in pipe_ids]
+    ##        r = [WM.ref(wm, nw, :resistance, i)[1] for i in pipe_ids]
+
+    ##        qp, qn = WM.var(wm, nw, :qp_pipe), WM.var(wm, nw, :qn_pipe)
+    ##        qp_vals = [max(0.0, WM.JuMP.callback_value(cb_data, qp[i])) for i in pipe_ids]
+    ##        qn_vals = [max(0.0, WM.JuMP.callback_value(cb_data, qn[i])) for i in pipe_ids]
+
+    ##        dhp, dhn = WM.var(wm, nw, :dhp_pipe), WM.var(wm, nw, :dhn_pipe)
+    ##        dhp_vals = [max(0.0, WM.JuMP.callback_value(cb_data, dhp[i])) for i in pipe_ids]
+    ##        dhn_vals = [max(0.0, WM.JuMP.callback_value(cb_data, dhn[i])) for i in pipe_ids]
+
+    ##        dhp_ests = L .* r .* qp_vals.^(exponent)
+    ##        dhn_ests = L .* r .* qn_vals.^(exponent)
+
+    ##        for i in 1:length(pipe_ids)
+    ##            if abs(dhp_vals[i] - dhp_ests[i]) > 1.0e-1
+    ##                y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
+    ##                lhs = WM._get_head_loss_oa_binary(qp[pipe_ids[i]], y, qp_vals[i], exponent)
+    ##                con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhp[pipe_ids[i]])
+    ##                WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+    ##            elseif abs(dhn_vals[i] - dhn_ests[i]) > 1.0e-1
+    ##                y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
+    ##                lhs = WM._get_head_loss_oa_binary(qn[pipe_ids[i]], 1.0 - y, qn_vals[i], exponent)
+    ##                con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhn[pipe_ids[i]])
+    ##                WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+    ##            end
+    ##        end
+    ##    end
+
+    ##    for nw in WM.nw_ids(wm)
+    ##        pump_ids = collect(WM.ids(wm, nw, :pump))
+
+    ##        qp, g, z  = WM.var(wm, nw, :qp_pump), WM.var(wm, nw, :g_pump), WM.var(wm, nw, :z_pump)
+    ##        qp_vals = [max(0.0, WM.JuMP.callback_value(cb_data, qp[i])) for i in pump_ids]
+    ##        g_vals = [max(0.0, WM.JuMP.callback_value(cb_data, g[i])) for i in pump_ids]
+    ##        z_vals = [WM.JuMP.callback_value(cb_data, z[i]) >= 0.5 ? 1.0 : 0.0 for i in pump_ids]
+
+    ##        head_curves = [WM.ref(wm, nw, :pump, i)["head_curve"] for i in pump_ids]
+    ##        pcs = [WM._get_function_from_head_curve(head_curves[i]) for i in 1:length(pump_ids)]
+    ##        g_ests = [(pcs[i][1] * qp_vals[i]^2) +
+    ##                  (pcs[i][2] * qp_vals[i]) +
+    ##                  pcs[i][3] * z_vals[i] for i in 1:length(pump_ids)]
+
+    ##        for i in 1:length(pump_ids)
+    ##            if abs(g_vals[i] - g_ests[i]) > 1.0e-1
+    ##                rhs = WM._get_head_gain_oa(qp[pump_ids[i]], z[pump_ids[i]], qp_vals[i], pcs[i])
+    ##                con = WM.JuMP.@build_constraint(g[pump_ids[i]] <= rhs)
+    ##                WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+    ##            end
+    ##        end
+    ##    end
+
+    ##    indicator_vars = _get_indicator_variables(wm)
+    ##    indicator_vals = WM.JuMP.callback_value.(Ref(cb_data), indicator_vars)
+    ##    is_integer = all(x -> isapprox(x, 1.0; atol = 0.01) ||
+    ##                     isapprox(x, 0.0; atol = 0.01), indicator_vals)
+
+    ##    if is_integer
+    ##        # Populate the solution of wm_nlp to use in the feasibility check.
+    ##        _populate_solution!(cb_data, wm, wm_nlp)
+    ##        wn, wnres = _simulate_solution(wm_nlp, network_path)
+    ##        _update_pipe_flows!(wm_nlp, wn, wnres)
+    ##        _update_pump_flows!(wm_nlp, wn, wnres)
+
+    ##        for nw in WM.nw_ids(wm)
+    ##            exponent = WM.ref(wm, nw, :alpha)
+    ##            nw_sol = wm_nlp.solution["nw"][string(nw)]
+    ##            pipe_ids = collect(WM.ids(wm, nw, :pipe))
+    ##            q_sol = [nw_sol["pipe"][string(i)]["q"] for i in pipe_ids]
+
+    ##            L = [WM.ref(wm, nw, :pipe, i)["length"] for i in pipe_ids]
+    ##            r = [WM.ref(wm, nw, :resistance, i)[1] for i in pipe_ids]
+    ##            qp, qn = WM.var(wm, nw, :qp_pipe), WM.var(wm, nw, :qn_pipe)
+    ##            dhp, dhn = WM.var(wm, nw, :dhp_pipe), WM.var(wm, nw, :dhn_pipe)
+
+    ##            for i in 1:length(pipe_ids)
+    ##                if q_sol[i] > 0.0
+    ##                    y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
+    ##                    lhs = WM._get_head_loss_oa_binary(qp[pipe_ids[i]], y, q_sol[i], exponent)
+    ##                    con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhp[pipe_ids[i]])
+    ##                    WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+    ##                elseif q_sol[i] < 0.0
+    ##                    y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
+    ##                    lhs = WM._get_head_loss_oa_binary(qn[pipe_ids[i]], 1.0 - y, -q_sol[i], exponent)
+    ##                    con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhn[pipe_ids[i]])
+    ##                    WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+    ##                end
+    ##            end
+    ##        end
+
+    ##        for nw in WM.nw_ids(wm)
+    ##            pump_ids = collect(WM.ids(wm, nw, :pump))
+    ##            qp, g, z  = WM.var(wm, nw, :qp_pump), WM.var(wm, nw, :g_pump), WM.var(wm, nw, :z_pump)
+    ##            head_curves = [WM.ref(wm, nw, :pump, i)["head_curve"] for i in pump_ids]
+    ##            pcs = [WM._get_function_from_head_curve(head_curves[i]) for i in 1:length(pump_ids)]
+
+    ##            nw_sol = wm_nlp.solution["nw"][string(nw)]
+    ##            q_sol = [nw_sol["pump"][string(i)]["q"] for i in pump_ids]
+
+    ##            for i in 1:length(pump_ids)
+    ##                if q_sol[i] > 1.0e-6
+    ##                    rhs = WM._get_head_gain_oa(qp[pump_ids[i]], z[pump_ids[i]], q_sol[i], pcs[i])
+    ##                    con = WM.JuMP.@build_constraint(g[pump_ids[i]] <= rhs)
+    ##                    WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+    ##                end
+    ##            end
+    ##        end
+    ##    end
+    ##end
+
+    ## Register the user cut callback with the JuMP modeling object.
+    ##WM._MOI.set(wm.model, WM._MOI.UserCutCallback(), user_cut_callback)
+
+    # Register the lazy cut callback with the JuMP modeling object.
     #WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), lazy_cut_callback)
-
-    #function user_cut_callback(cb_data) # Define the user cut callback function.
-    #    for nw in WM.nw_ids(wm)
-    #        exponent = WM.ref(wm, nw, :alpha)
-    #        pipe_ids = collect(WM.ids(wm, nw, :pipe))
-    #        L = [WM.ref(wm, nw, :pipe, i)["length"] for i in pipe_ids]
-    #        r = [WM.ref(wm, nw, :resistance, i)[1] for i in pipe_ids]
-
-    #        qp, qn = WM.var(wm, nw, :qp_pipe), WM.var(wm, nw, :qn_pipe)
-    #        qp_vals = [max(0.0, WM.JuMP.callback_value(cb_data, qp[i])) for i in pipe_ids]
-    #        qn_vals = [max(0.0, WM.JuMP.callback_value(cb_data, qn[i])) for i in pipe_ids]
-
-    #        dhp, dhn = WM.var(wm, nw, :dhp_pipe), WM.var(wm, nw, :dhn_pipe)
-    #        dhp_vals = [max(0.0, WM.JuMP.callback_value(cb_data, dhp[i])) for i in pipe_ids]
-    #        dhn_vals = [max(0.0, WM.JuMP.callback_value(cb_data, dhn[i])) for i in pipe_ids]
-
-    #        dhp_ests = L .* r .* qp_vals.^(exponent)
-    #        dhn_ests = L .* r .* qn_vals.^(exponent)
-
-    #        for i in 1:length(pipe_ids)
-    #            if abs(dhp_vals[i] - dhp_ests[i]) > 1.0e-1
-    #                y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
-    #                lhs = WM._get_head_loss_oa_binary(qp[pipe_ids[i]], y, qp_vals[i], exponent)
-    #                con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhp[pipe_ids[i]])
-    #                WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
-    #            elseif abs(dhn_vals[i] - dhn_ests[i]) > 1.0e-1
-    #                y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
-    #                lhs = WM._get_head_loss_oa_binary(qn[pipe_ids[i]], 1.0 - y, qn_vals[i], exponent)
-    #                con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhn[pipe_ids[i]])
-    #                WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
-    #            end
-    #        end
-    #    end
-
-    #    for nw in WM.nw_ids(wm)
-    #        pump_ids = collect(WM.ids(wm, nw, :pump))
-
-    #        qp, g, z  = WM.var(wm, nw, :qp_pump), WM.var(wm, nw, :g_pump), WM.var(wm, nw, :z_pump)
-    #        qp_vals = [max(0.0, WM.JuMP.callback_value(cb_data, qp[i])) for i in pump_ids]
-    #        g_vals = [max(0.0, WM.JuMP.callback_value(cb_data, g[i])) for i in pump_ids]
-    #        z_vals = [WM.JuMP.callback_value(cb_data, z[i]) >= 0.5 ? 1.0 : 0.0 for i in pump_ids]
-
-    #        head_curves = [WM.ref(wm, nw, :pump, i)["head_curve"] for i in pump_ids]
-    #        pcs = [WM._get_function_from_head_curve(head_curves[i]) for i in 1:length(pump_ids)]
-    #        g_ests = [(pcs[i][1] * qp_vals[i]^2) +
-    #                  (pcs[i][2] * qp_vals[i]) +
-    #                  pcs[i][3] * z_vals[i] for i in 1:length(pump_ids)]
-
-    #        for i in 1:length(pump_ids)
-    #            if abs(g_vals[i] - g_ests[i]) > 1.0e-1
-    #                rhs = WM._get_head_gain_oa(qp[pump_ids[i]], z[pump_ids[i]], qp_vals[i], pcs[i])
-    #                con = WM.JuMP.@build_constraint(g[pump_ids[i]] <= rhs)
-    #                WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
-    #            end
-    #        end
-    #    end
-
-    #    indicator_vars = _get_indicator_variables(wm)
-    #    indicator_vals = WM.JuMP.callback_value.(Ref(cb_data), indicator_vars)
-    #    is_integer = all(x -> isapprox(x, 1.0; atol = 0.01) ||
-    #                     isapprox(x, 0.0; atol = 0.01), indicator_vals)
-
-    #    if is_integer
-    #        # Populate the solution of wm_nlp to use in the feasibility check.
-    #        _populate_solution!(cb_data, wm, wm_nlp)
-    #        wn, wnres = _simulate_solution(wm_nlp, network_path)
-    #        _update_pipe_flows!(wm_nlp, wn, wnres)
-    #        _update_pump_flows!(wm_nlp, wn, wnres)
-
-    #        for nw in WM.nw_ids(wm)
-    #            exponent = WM.ref(wm, nw, :alpha)
-    #            nw_sol = wm_nlp.solution["nw"][string(nw)]
-    #            pipe_ids = collect(WM.ids(wm, nw, :pipe))
-    #            q_sol = [nw_sol["pipe"][string(i)]["q"] for i in pipe_ids]
-
-    #            L = [WM.ref(wm, nw, :pipe, i)["length"] for i in pipe_ids]
-    #            r = [WM.ref(wm, nw, :resistance, i)[1] for i in pipe_ids]
-    #            qp, qn = WM.var(wm, nw, :qp_pipe), WM.var(wm, nw, :qn_pipe)
-    #            dhp, dhn = WM.var(wm, nw, :dhp_pipe), WM.var(wm, nw, :dhn_pipe)
-
-    #            for i in 1:length(pipe_ids)
-    #                if q_sol[i] > 0.0
-    #                    y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
-    #                    lhs = WM._get_head_loss_oa_binary(qp[pipe_ids[i]], y, q_sol[i], exponent)
-    #                    con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhp[pipe_ids[i]])
-    #                    WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
-    #                elseif q_sol[i] < 0.0
-    #                    y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
-    #                    lhs = WM._get_head_loss_oa_binary(qn[pipe_ids[i]], 1.0 - y, -q_sol[i], exponent)
-    #                    con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhn[pipe_ids[i]])
-    #                    WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
-    #                end
-    #            end
-    #        end
-
-    #        for nw in WM.nw_ids(wm)
-    #            pump_ids = collect(WM.ids(wm, nw, :pump))
-    #            qp, g, z  = WM.var(wm, nw, :qp_pump), WM.var(wm, nw, :g_pump), WM.var(wm, nw, :z_pump)
-    #            head_curves = [WM.ref(wm, nw, :pump, i)["head_curve"] for i in pump_ids]
-    #            pcs = [WM._get_function_from_head_curve(head_curves[i]) for i in 1:length(pump_ids)]
-
-    #            nw_sol = wm_nlp.solution["nw"][string(nw)]
-    #            q_sol = [nw_sol["pump"][string(i)]["q"] for i in pump_ids]
-
-    #            for i in 1:length(pump_ids)
-    #                if q_sol[i] > 1.0e-6
-    #                    rhs = WM._get_head_gain_oa(qp[pump_ids[i]], z[pump_ids[i]], q_sol[i], pcs[i])
-    #                    con = WM.JuMP.@build_constraint(g[pump_ids[i]] <= rhs)
-    #                    WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
-    #                end
-    #            end
-    #        end
-    #    end
-    #end
-
-    # Register the user cut callback with the JuMP modeling object.
-    #WM._MOI.set(wm.model, WM._MOI.UserCutCallback(), user_cut_callback)
-
+    
     # Add additional specialized cuts.
-    add_pump_volume_cuts!(wm)
+    #add_pump_volume_cuts!(wm)
 
     # Solve the OWF optimization problem.
     result = WM.optimize_model!(wm)
@@ -309,6 +324,9 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     result["objective_comparison"] = objective_comparison_table
     result["num_infeasible_solutions"] = num_infeasible_solutions
     result["infeasibilities"] = infeasibility_map
+
+    #wntr_result = WMA.simulate_wntr(wntr_network)
+    #_compare_pipe_flows(wm, wntr_result)
 
     # Return the optimization result dictionary.
     return result
@@ -423,13 +441,18 @@ end
 
 
 function _set_van_zyl_statuses(wm::AbstractWaterModel)
-    statuses = Dict{String, Array}("pmp1" => [0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1],
-                                   "pmp2" => [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 0],
-                                   "pmp6" => [0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1])
+    statuses = Dict{String, Array}("pmp1" => [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 0 0 1],
+                                   "pmp2" => [0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 0 0 1 1 1 1 1 1 1],
+                                   "pmp6" => [0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1])
 
     for (nw, nw_ref) in WM.nws(wm)
         for (a, pump) in WM.ref(wm, nw, :pump)
             pump_name = pump["name"]
+
+            if pump_name != "pmp1"
+                continue
+            end
+
             pump_status = statuses[pump_name][nw]
             pump["z_min"] = Float64(pump_status)
             pump["z_max"] = Float64(pump_status)
@@ -551,15 +574,36 @@ function _calc_wntr_objective(wm::AbstractWaterModel, wntr_result::WMA.PyCall.Py
         price = [WM.ref(wm, nw, :pump, pump_id)["energy_price"] for nw in network_ids]
         flow = WMA.PyCall.getproperty(wntr_result.link["flowrate"], i).values[1:end-1]
         status = WMA.PyCall.getproperty(wntr_result.link["status"], i).values[1:end-1]
-        energy = WM._calc_pump_energy.(Ref(wm), Ref(wm.cnw), Ref(pump_id), Float64.(flow))
+        #energy = WM._calc_pump_energy.(Ref(wm), Ref(wm.cnw), Ref(pump_id), Float64.(flow))
 
         #headloss = WMA.PyCall.getproperty(wntr_result.link["headloss"], i).values[1:end-1]
-        #head_i = WMA.PyCall.getproperty(wntr_result.node["head"], string(pump["node_fr"])).values[1:end-1]
-        #head_j = WMA.PyCall.getproperty(wntr_result.node["head"], string(pump["node_to"])).values[1:end-1]
+        head_i = WMA.PyCall.getproperty(wntr_result.node["head"], string(pump["node_fr"])).values[1:end-1]
+        head_j = WMA.PyCall.getproperty(wntr_result.node["head"], string(pump["node_to"])).values[1:end-1]
         #coeff = WM._get_function_from_head_curve(pump["head_curve"])
 
-        wntr_objective_value += sum(round.(status) .* energy .* price)
+        if haskey(pump, "efficiency_curve")
+            eff_curve = pump["efficiency_curve"]
+            eff = WM._calc_efficiencies(Float64.(flow), eff_curve)
+        else
+            eff = pump["efficiency"]
+        end
+
+        coeff = WM._DENSITY * WM._GRAVITY * WM.ref(wm, :time_step)
+        energy = coeff .* round.(status) .* flow .* (head_j .- head_i) .* inv.(eff)
+        wntr_objective_value += sum(energy .* price)
     end
 
     return wntr_objective_value
+end
+
+
+function _compare_pipe_flows(wm::AbstractWaterModel, wntr_result::WMA.PyCall.PyObject)
+    network_ids = [string(n) for n in sort(collect(WM.nw_ids(wm)))]
+
+    for (pipe_id, pipe) in WM.ref(wm, :pipe)
+        i = "pipe" * string(pipe_id) # WMA pipe index (a string).
+        flow_sim = WMA.PyCall.getproperty(wntr_result.link["flowrate"], i).values[1:end-1]
+        flow_opt = [wm.solution["nw"][nw]["pipe"][string(pipe_id)]["q"] for nw in network_ids]
+        #println((Float64.(flow_sim) .- flow_opt))
+    end
 end
