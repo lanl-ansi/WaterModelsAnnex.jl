@@ -1,12 +1,11 @@
 module WaterModelsAnnex
 
-using WaterModels
-
+import JuMP
+import WaterModels
 import LightGraphs
-import WaterModelsAnalytics
 
 const WM = WaterModels
-const WMA = WaterModelsAnalytics
+const JuMP = WM.JuMP
 const MOI = WM.MathOptInterface
 const MOIU = WM.MathOptInterface.Utilities
 const LOGGER = WM.Memento.getlogger(WM)
@@ -23,11 +22,15 @@ function silence()
     WM.Memento.setlevel!(Memento.getlogger(WM), "error")
 end
 
-include("util/graph.jl")
+include("core/types.jl")
+include("form/cd.jl")
+include("prob/wf.jl")
 
-include("alg/compute_source_pumps.jl")
-include("alg/pump_volume_cuts.jl")
-include("alg/solve_owf.jl")
+#include("util/graph.jl")
+#
+#include("alg/compute_source_pumps.jl")
+#include("alg/pump_volume_cuts.jl")
+#include("alg/solve_owf.jl")
 
 #include("alg/ne-add_tasseff.jl")
 #include("alg/ne-global.jl")
@@ -37,5 +40,7 @@ include("alg/solve_owf.jl")
 #include("alg/ne-tasseff_cut.jl")
 #include("util/check_physical_solution.jl")
 #include("util/get_physical_solution.jl")
+
+include("core/export.jl")
 
 end

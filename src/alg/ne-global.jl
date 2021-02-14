@@ -28,7 +28,7 @@ function ne_global(network_path::String, modifications_path::String,
     WM.set_start_resistance_ne!(network)
 
     # Build the relaxed network expansion problem.
-    ne = WM.build_generic_model(network, WM.MILPRWaterModel, WM.post_ne)
+    ne = WM.build_generic_model(network, WM.PWLRDWaterModel, WM.post_ne)
 
     max_iterations = 25
     iteration_counter = 0

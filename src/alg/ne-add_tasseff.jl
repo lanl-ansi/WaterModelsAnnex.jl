@@ -246,7 +246,7 @@ function ne_primal_dual(network_path::String, modifications_path::String,
     InfrastructureModels.update_data!(network, modifications)
 
     # Build the relaxed network expansion problem.
-    ne = WM.build_generic_model(network, WM.MILPRWaterModel, WM.post_ne)
+    ne = WM.build_generic_model(network, WM.PWLRDWaterModel, WM.post_ne)
     add_system!(ne) # Add the primal-dual feasibility system.
     ne_solution = WM.solve_generic_model(ne, mip_optimizer)
 end

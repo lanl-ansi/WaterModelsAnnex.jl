@@ -114,11 +114,11 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
         add_pairwise_cuts(wm, pairwise_cuts)
     end
 
-    wntr_network = WMA.initialize_wntr_network(wm.data)
+    #wntr_network = WMA.initialize_wntr_network(wm.data)
 
-    # Solve the convex, continuously-relaxed optimal water flow problem.
-    wm_nlp = construct_relaxed_owf_model(network, obbt_optimizer)
-    nlp_result = WM.optimize_model!(wm_nlp)
+    ## Solve the convex, continuously-relaxed optimal water flow problem.
+    #wm_nlp = construct_relaxed_owf_model(network, obbt_optimizer)
+    #nlp_result = WM.optimize_model!(wm_nlp)
 
     num_infeasible_solutions = 0 # Number of integer *infeasible* solutions.
     objective_comparison_table = [] # Compares relaxed versus true objectives.
@@ -215,12 +215,12 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     ##        for i in 1:length(pipe_ids)
     ##            if abs(dhp_vals[i] - dhp_ests[i]) > 1.0e-1
     ##                y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
-    ##                lhs = WM._get_head_loss_oa_binary(qp[pipe_ids[i]], y, qp_vals[i], exponent)
+    ##                lhs = WM._calc_head_loss_oa(qp[pipe_ids[i]], y, qp_vals[i], exponent)
     ##                con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhp[pipe_ids[i]])
     ##                WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
     ##            elseif abs(dhn_vals[i] - dhn_ests[i]) > 1.0e-1
     ##                y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
-    ##                lhs = WM._get_head_loss_oa_binary(qn[pipe_ids[i]], 1.0 - y, qn_vals[i], exponent)
+    ##                lhs = WM._calc_head_loss_oa(qn[pipe_ids[i]], 1.0 - y, qn_vals[i], exponent)
     ##                con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhn[pipe_ids[i]])
     ##                WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
     ##            end
@@ -276,12 +276,12 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     ##            for i in 1:length(pipe_ids)
     ##                if q_sol[i] > 0.0
     ##                    y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
-    ##                    lhs = WM._get_head_loss_oa_binary(qp[pipe_ids[i]], y, q_sol[i], exponent)
+    ##                    lhs = WM._calc_head_loss_oa(qp[pipe_ids[i]], y, q_sol[i], exponent)
     ##                    con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhp[pipe_ids[i]])
     ##                    WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
     ##                elseif q_sol[i] < 0.0
     ##                    y = WM.var(wm, nw, :y_pipe, pipe_ids[i])
-    ##                    lhs = WM._get_head_loss_oa_binary(qn[pipe_ids[i]], 1.0 - y, -q_sol[i], exponent)
+    ##                    lhs = WM._calc_head_loss_oa(qn[pipe_ids[i]], 1.0 - y, -q_sol[i], exponent)
     ##                    con = WM.JuMP.@build_constraint(r[i] * lhs <= inv(L[i]) * dhn[pipe_ids[i]])
     ##                    WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
     ##                end
