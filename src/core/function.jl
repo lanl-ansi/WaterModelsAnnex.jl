@@ -19,17 +19,17 @@ end
 
 
 function _fdh_cd(alpha::Float64)
-    return x -> (alpha + 1.0) / (alpha + 2.0) * (x*x)^(0.5 + 0.5 / (1.0 + alpha))
+    return x -> (alpha + 1.0) / (alpha + 2.0) * (x * x)^(0.5 + 0.5 / (1.0 + alpha))
 end
 
 
 function _dfdh_cd(alpha::Float64)
-    return x -> abs(x)^(1.0 / (alpha + 1.0))
+    return x -> (x*x)^(0.5 / (alpha + 1.0))
 end
 
 
 function _d2fdh_cd(alpha::Float64)
-    return x -> (x^(-(alpha) / (1.0 + alpha))) / (1.0 + alpha)
+    return x -> sign(x) * ((x*x)^(-(0.5 * alpha) / (1.0 + alpha))) / (1.0 + alpha)
 end
 
 

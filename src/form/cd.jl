@@ -122,10 +122,44 @@ function WM.constraint_on_off_pump_flow(wm::AbstractCDModel, n::Int, a::Int, q_m
 end
 
 
+function WM.constraint_on_off_regulator_flow(wm::AbstractCDModel, n::Int, a::Int, q_min_forward::Float64)
+    # Get regulator flow, status, and direction variables.
+    qp, z = WM.var(wm, n, :qp_regulator, a), WM.var(wm, n, :z_regulator, a)
+
+    # If the regulator is closed, flow must be zero.
+    qp_lb, qp_ub = max(JuMP.lower_bound(qp), q_min_forward), JuMP.upper_bound(qp)
+    c_1 = JuMP.@constraint(wm.model, qp >= qp_lb * z)
+    c_2 = JuMP.@constraint(wm.model, qp <= qp_ub * z)
+
+    # Append the :on_off_regulator_flow constraint array.
+    append!(WM.con(wm, n, :on_off_regulator_flow, a), [c_1, c_2])
+end
+
+
+function WM.constraint_short_pipe_flow(wm::AbstractCDModel, n::Int, a::Int, q_max_reverse::Float64, q_min_forward::Float64)
+    # Nothing here for an AbstractCDModel.
+end
+
+
+function WM.constraint_on_off_valve_flow(wm::AbstractCDModel, n::Int, a::Int, q_max_reverse::Float64, q_min_forward::Float64)
+    # Get valve flow, direction, and status variables.
+    qp, qn = WM.var(wm, n, :qp_valve, a), WM.var(wm, n, :qn_valve, a)
+    z = WM.var(wm, n, :z_valve, a)
+
+    # The valve flow is constrained by direction and status.
+    qp_ub, qn_ub = JuMP.upper_bound(qp), JuMP.upper_bound(qn)
+    c_1 = JuMP.@constraint(wm.model, qp <= qp_ub * z)
+    c_2 = JuMP.@constraint(wm.model, qn <= qn_ub * z)
+
+    # Append the constraint array.
+    append!(WM.con(wm, n, :on_off_valve_flow, a), [c_1, c_2])
+end
+
+
 """
     objective_wf(wm::AbstractCDModel)
 """
-function WM.objective_wf(wm::AbstractCDModel)
+function constraint_strong_duality(wm::AbstractCDModel)
     base_length = get(wm.data, "base_length", 1.0)
     base_time = get(wm.data, "base_time", 1.0)
     alpha = WM._get_alpha_min_1(wm) + 1.0
@@ -158,6 +192,7 @@ function WM.objective_wf(wm::AbstractCDModel)
         dhn_des_pipe = WM.var(wm, n, :dhn_des_pipe)
 
         # Get pump flow and head difference variables.
+        q_tank = WM.var(wm, n, :q_tank)
         qp_pump = WM.var(wm, n, :qp_pump)
         g_pump = WM.var(wm, n, :g_pump)
         
@@ -224,13 +259,18 @@ function WM.objective_wf(wm::AbstractCDModel)
         for (i, demand) in WM.ref(wm, n, :demand)
             push!(f_4, JuMP.@NLexpression(wm.model, demand["flow_nominal"] * h[demand["node"]]))
         end
+
+        for (i, tank) in WM.ref(wm, n, :tank)
+            # TODO: How should we convexify this?
+            push!(f_4, JuMP.@NLexpression(wm.model, -q_tank[i] * h[tank["node"]]))
+        end
     end
 
-    JuMP.@NLobjective(wm.model, WM._MOI.MIN_SENSE,
+    JuMP.@NLconstraint(wm.model,
         sum(f_1[k] for k in 1:length(f_1)) -
         sum(f_2[k] for k in 1:length(f_2)) +
         sum(f_3[k] for k in 1:length(f_3)) +
         sum(f_4[k] for k in 1:length(f_4)) -
         sum(f_5[k] for k in 1:length(f_5)) +
-        sum(f_6[k] for k in 1:length(f_6)))
+        sum(f_6[k] for k in 1:length(f_6)) <= 0.0)
 end
