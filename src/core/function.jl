@@ -45,7 +45,7 @@ function head_loss_dh_args(wm::AbstractCDModel)
 end
 
 
-function _function_head_loss(wm::AbstractCDModel)
+function WM._function_head_loss(wm::AbstractCDModel)
     JuMP.register(wm.model, head_loss_args(wm)...)
     JuMP.register(wm.model, head_loss_dh_args(wm)...)
 end

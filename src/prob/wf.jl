@@ -1,9 +1,9 @@
 function WM.build_wf(wm::AbstractCDModel)
     # Create head loss functions, if necessary.
-    _function_head_loss(wm)
+    WM._function_head_loss(wm)
 
     # Physical variables.
-    variable_flow(wm; bounded = true)
+    WM.variable_flow(wm; bounded = true)
     WM.variable_head(wm; bounded = true)
     WM.variable_pump_head_gain(wm; bounded = true)
     WM.variable_pump_power(wm; bounded = true)

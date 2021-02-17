@@ -48,7 +48,7 @@ end
 
 
 "Create flow-related variables common to all directed flow models for node-connecting components."
-function variable_flow(wm::AbstractCDModel; nw::Int=wm.cnw, bounded::Bool=true, report::Bool=true)
+function WM.variable_flow(wm::AbstractCDModel; nw::Int=wm.cnw, bounded::Bool=true, report::Bool=true)
     for name in ["des_pipe", "pipe", "pump", "regulator", "short_pipe", "valve"]
         # Create directed flow (`qp` and `qn`) variables for each component.
         WM._variable_component_flow(wm, name; nw=nw, bounded=bounded, report=report)
@@ -161,7 +161,6 @@ function WM.objective_wf(wm::AbstractCDModel)
         qp_pump = WM.var(wm, n, :qp_pump)
         g_pump = WM.var(wm, n, :g_pump)
         
-    
         for (a, pipe) in WM.ref(wm, n, :pipe)
             L_x_r = pipe["length"] * WM._calc_pipe_resistance(pipe, pipe_type, viscosity, base_length, base_time)
             push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qp_pipe[a])))
