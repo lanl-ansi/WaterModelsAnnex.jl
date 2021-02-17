@@ -23,6 +23,8 @@ function silence()
 end
 
 include("core/types.jl")
+include("core/function.jl")
+
 include("form/cd.jl")
 include("prob/wf.jl")
 

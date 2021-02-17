@@ -60,31 +60,178 @@ function variable_flow(wm::AbstractCDModel; nw::Int=wm.cnw, bounded::Bool=true, 
     end
 end
 
+
+function WM.constraint_pipe_head(wm::AbstractCDModel, n::Int, a::Int, node_fr::Int, node_to::Int)
+    # Get common flow variables and associated data.
+    dhp, dhn = WM.var(wm, n, :dhp_pipe, a), WM.var(wm, n, :dhn_pipe, a)
+
+    # Get head variables for from and to nodes.
+    h_i, h_j = WM.var(wm, n, :h, node_fr), WM.var(wm, n, :h, node_to)
+
+    # For pipes, the differences must satisfy lower and upper bounds.
+    c = JuMP.@constraint(wm.model, dhp - dhn == h_i - h_j)
+
+    # Append the :pipe_head constraint array.
+    append!(WM.con(wm, n, :pipe_head, a), [c])
+end
+
+
+function WM.constraint_on_off_des_pipe_flow(wm::AbstractCDModel, n::Int, a::Int, q_max_reverse::Float64, q_min_forward::Float64)
+    # Get des_pipe status variable.
+    qp, qn = WM.var(wm, n, :qp_des_pipe, a), WM.var(wm, n, :qn_des_pipe, a)
+    z = WM.var(wm, n, :z_des_pipe, a)
+
+    # If the des_pipe is inactive, flow must be zero.
+    qp_ub, qn_ub = JuMP.upper_bound(qp), JuMP.upper_bound(qn)
+    c_1 = JuMP.@constraint(wm.model, qp <= qp_ub * z)
+    c_2 = JuMP.@constraint(wm.model, qn <= qn_ub * z)
+
+    # Append the constraint array.
+    append!(WM.con(wm, n, :on_off_des_pipe_flow, a), [c_1, c_2])
+end
+
+
+function WM.constraint_on_off_des_pipe_head(wm::AbstractCDModel, n::Int, a::Int, node_fr::Int, node_to::Int)
+    # Get head difference variables for the des_pipe.
+    dhp, dhn = WM.var(wm, n, :dhp_des_pipe, a), WM.var(wm, n, :dhn_des_pipe, a)
+
+    # Get des_pipe status variable.
+    z = WM.var(wm, n, :z_des_pipe, a)
+
+    # If the des_pipe is off, decouple the head difference relationship.
+    dhp_ub, dhn_ub = JuMP.upper_bound(dhp), JuMP.upper_bound(dhn)
+    c_1 = JuMP.@constraint(wm.model, dhp <= dhp_ub * z)
+    c_2 = JuMP.@constraint(wm.model, dhn <= dhn_ub * z)
+
+    # Append the constraint array.
+    append!(WM.con(wm, n, :on_off_des_pipe_head, a), [c_1, c_2])
+end
+
+
+function WM.constraint_on_off_pump_flow(wm::AbstractCDModel, n::Int, a::Int, q_min_forward::Float64)
+    # Get pump status variable.
+    qp, z = WM.var(wm, n, :qp_pump, a), WM.var(wm, n, :z_pump, a)
+
+    # If the pump is inactive, flow must be zero.
+    qp_lb, qp_ub = q_min_forward, JuMP.upper_bound(qp)
+    c_1 = JuMP.@constraint(wm.model, qp >= qp_lb * z)
+    c_2 = JuMP.@constraint(wm.model, qp <= qp_ub * z)
+
+    # Append the constraint array.
+    append!(WM.con(wm, n, :on_off_pump_flow, a), [c_1, c_2])
+end
+
+
 """
     objective_wf(wm::AbstractCDModel)
 """
 function WM.objective_wf(wm::AbstractCDModel)
-    n = wm.cnw
-
-    qp_pipe, qn_pipe = WM.var(wm, n, :qp_pipe), WM.var(wm, n, :qn_pipe)
-
+    base_length = get(wm.data, "base_length", 1.0)
+    base_time = get(wm.data, "base_time", 1.0)
+    alpha = WM._get_alpha_min_1(wm) + 1.0
+    
     pipe_type = wm.ref[:it][WM.wm_it_sym][:head_loss]
     viscosity = wm.ref[:it][WM.wm_it_sym][:viscosity]
 
-    L_x_r = Dict{Int, Any}(a => pipe["length"] *
-        WM._calc_pipe_resistance(pipe, pipe_type, viscosity)
-        for (a, pipe) in WM.ref(wm, n, :pipe))
+    f_1, f_2 = Array{Any, 1}([0.0]), Array{Any, 1}([0.0])
+    f_3, f_4 = Array{Any, 1}([0.0]), Array{Any, 1}([0.0])
+    f_5, f_6 = Array{Any, 1}([0.0]), Array{Any, 1}([0.0])
 
-    f_1 = JuMP.@NLexpression(wm.model,
-        sum(L_x_r[a] * 0.35063113604 *
-        (qp_pipe[a]^2.852 + qn_pipe[a]^2.852)
-        for (a, pipe) in WM.ref(wm, n, :pipe)))
+    for (n, network) in WM.nws(wm)
+        # Get head variables.
+        h = WM.var(wm, n, :h)
 
-    f_2 = JuMP.@NLexpression(wm.model,
-        sum(WM.ref(wm, n, :node, reservoir["node"])["head_nominal"]
-        * sum(qp_pipe[a] - qn_pipe[a] for (a) in
-        WM.ref(wm, n, :pipe_fr, reservoir["node"]))
-        for (i, reservoir) in WM.ref(wm, n, :reservoir)))
+        # Get pipe flow variables.
+        qp_pipe = WM.var(wm, n, :qp_pipe)
+        qn_pipe = WM.var(wm, n, :qn_pipe)
 
-    JuMP.@NLobjective(wm.model, MOI.MIN_SENSE, f_1 - f_2)
+        # Get pipe head difference variables.
+        dhp_pipe = WM.var(wm, n, :dhp_pipe)
+        dhn_pipe = WM.var(wm, n, :dhn_pipe)
+
+        # Get design pipe flow variables.
+        qp_des_pipe = WM.var(wm, n, :qp_des_pipe)
+        qn_des_pipe = WM.var(wm, n, :qn_des_pipe)
+
+        # Get design pipe head difference variables.
+        dhp_des_pipe = WM.var(wm, n, :dhp_des_pipe)
+        dhn_des_pipe = WM.var(wm, n, :dhn_des_pipe)
+
+        # Get pump flow and head difference variables.
+        qp_pump = WM.var(wm, n, :qp_pump)
+        g_pump = WM.var(wm, n, :g_pump)
+        
+    
+        for (a, pipe) in WM.ref(wm, n, :pipe)
+            L_x_r = pipe["length"] * WM._calc_pipe_resistance(pipe, pipe_type, viscosity, base_length, base_time)
+            push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qp_pipe[a])))
+            push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qn_pipe[a])))
+            push!(f_3, JuMP.@NLexpression(wm.model, L_x_r^(-1.0 / alpha) * head_loss_dh(dhp_pipe[a])))
+            push!(f_3, JuMP.@NLexpression(wm.model, L_x_r^(-1.0 / alpha) * head_loss_dh(dhn_pipe[a])))
+        end
+
+        for (a, des_pipe) in WM.ref(wm, n, :des_pipe)
+            L_x_r = des_pipe["length"] * WM._calc_pipe_resistance(des_pipe, pipe_type, viscosity, base_length, base_time)
+            push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qp_des_pipe[a])))
+            push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qn_des_pipe[a])))
+            push!(f_3, JuMP.@NLexpression(wm.model, L_x_r^(-1.0 / alpha) * head_loss_dh(dhp_des_pipe[a])))
+            push!(f_3, JuMP.@NLexpression(wm.model, L_x_r^(-1.0 / alpha) * head_loss_dh(dhn_des_pipe[a])))
+        end
+
+        for (a, pump) in WM.ref(wm, n, :pump)
+            @assert pump["head_curve_form"] in [WM.QUADRATIC, WM.BEST_EFFICIENCY_POINT, WM.LINEAR_POWER]
+            c = WM._calc_head_curve_coefficients(pump)
+            
+            push!(f_5, JuMP.@NLexpression(wm.model, c[1] / 3.0 * qp_pump[a]^3 +
+                0.5 * c[2] * qp_pump[a]^2 + c[3] * qp_pump[a]))
+
+            push!(f_6, JuMP.@NLexpression(wm.model,
+                (-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
+                c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
+                c[1] * g_pump[a] + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *
+                (-sqrt(-4.0 *c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
+                c[2])) / (2.0 * c[1]) - (g_pump[a] * (-sqrt(-4.0 * c[1] * c[3] +
+                4.0 * c[1] * g_pump[a] + c[2]^2) - c[2])) / (2.0 * c[1])))
+        end
+
+        for (i, res) in WM.ref(wm, n, :reservoir)
+            head = WM.ref(wm, n, :node, res["node"])["head_nominal"]
+
+            for a in WM.ref(wm, n, :pipe_fr, res["node"])
+                push!(f_2, JuMP.@NLexpression(wm.model, head * (qp_pipe[a] - qn_pipe[a])))
+            end
+
+            for a in WM.ref(wm, n, :pipe_to, res["node"])
+                push!(f_2, JuMP.@NLexpression(wm.model, head * (qn_pipe[a] - qp_pipe[a])))
+            end
+
+            for a in WM.ref(wm, n, :pump_fr, res["node"])
+                push!(f_2, JuMP.@NLexpression(wm.model, head * qp_pump[a]))
+            end
+
+            for a in WM.ref(wm, n, :pump_to, res["node"])
+                push!(f_2, JuMP.@NLexpression(wm.model, -head * qp_pump[a]))
+            end
+
+            for a in WM.ref(wm, n, :des_pipe_fr, res["node"])
+                push!(f_2, JuMP.@NLexpression(wm.model, head * (qp_des_pipe[a] - qn_des_pipe[a])))
+            end
+
+            for a in WM.ref(wm, n, :des_pipe_to, res["node"])
+                push!(f_2, JuMP.@NLexpression(wm.model, head * (qn_des_pipe[a] - qp_des_pipe[a])))
+            end
+        end
+
+        for (i, demand) in WM.ref(wm, n, :demand)
+            push!(f_4, JuMP.@NLexpression(wm.model, demand["flow_nominal"] * h[demand["node"]]))
+        end
+    end
+
+    JuMP.@NLobjective(wm.model, WM._MOI.MIN_SENSE,
+        sum(f_1[k] for k in 1:length(f_1)) -
+        sum(f_2[k] for k in 1:length(f_2)) +
+        sum(f_3[k] for k in 1:length(f_3)) +
+        sum(f_4[k] for k in 1:length(f_4)) -
+        sum(f_5[k] for k in 1:length(f_5)) +
+        sum(f_6[k] for k in 1:length(f_6)))
 end
