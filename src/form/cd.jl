@@ -191,6 +191,10 @@ function constraint_strong_duality(wm::AbstractCDModel)
         dhp_des_pipe = WM.var(wm, n, :dhp_des_pipe)
         dhn_des_pipe = WM.var(wm, n, :dhn_des_pipe)
 
+        # Get valve flow variables.
+        qp_valve = WM.var(wm, n, :qp_valve)
+        qn_valve = WM.var(wm, n, :qn_valve)
+
         # Get pump flow and head difference variables.
         q_tank = WM.var(wm, n, :q_tank)
         qp_pump = WM.var(wm, n, :qp_pump)
@@ -231,28 +235,17 @@ function constraint_strong_duality(wm::AbstractCDModel)
         for (i, res) in WM.ref(wm, n, :reservoir)
             head = WM.ref(wm, n, :node, res["node"])["head_nominal"]
 
-            for a in WM.ref(wm, n, :pipe_fr, res["node"])
-                push!(f_2, JuMP.@NLexpression(wm.model, head * (qp_pipe[a] - qn_pipe[a])))
-            end
+            for comp in [:des_pipe, :pipe, :pump, :regulator, :short_pipe, :valve]
+                qp = WM.var(wm, n, Symbol("qp_" * string(comp)))
+                qn = WM.var(wm, n, Symbol("qn_" * string(comp)))
 
-            for a in WM.ref(wm, n, :pipe_to, res["node"])
-                push!(f_2, JuMP.@NLexpression(wm.model, head * (qn_pipe[a] - qp_pipe[a])))
-            end
+                for a in WM.ref(wm, n, Symbol(string(comp) * "_fr"), res["node"])
+                    push!(f_2, JuMP.@NLexpression(wm.model, head * (qp[a] - qn[a])))
+                end
 
-            for a in WM.ref(wm, n, :pump_fr, res["node"])
-                push!(f_2, JuMP.@NLexpression(wm.model, head * qp_pump[a]))
-            end
-
-            for a in WM.ref(wm, n, :pump_to, res["node"])
-                push!(f_2, JuMP.@NLexpression(wm.model, -head * qp_pump[a]))
-            end
-
-            for a in WM.ref(wm, n, :des_pipe_fr, res["node"])
-                push!(f_2, JuMP.@NLexpression(wm.model, head * (qp_des_pipe[a] - qn_des_pipe[a])))
-            end
-
-            for a in WM.ref(wm, n, :des_pipe_to, res["node"])
-                push!(f_2, JuMP.@NLexpression(wm.model, head * (qn_des_pipe[a] - qp_des_pipe[a])))
+                for a in WM.ref(wm, n, Symbol(string(comp) * "_to"), res["node"])
+                    push!(f_2, JuMP.@NLexpression(wm.model, head * (qn[a] - qp[a])))
+                end
             end
         end
 

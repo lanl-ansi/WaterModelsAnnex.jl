@@ -28,21 +28,6 @@ include("core/function.jl")
 include("form/cd.jl")
 include("prob/wf.jl")
 
-#include("util/graph.jl")
-#
-#include("alg/compute_source_pumps.jl")
-#include("alg/pump_volume_cuts.jl")
-#include("alg/solve_owf.jl")
-
-#include("alg/ne-add_tasseff.jl")
-#include("alg/ne-global.jl")
-#include("alg/ne-decomp_cut.jl")
-#include("alg/ne-humpola_cut.jl")
-#include("alg/ne-no_good_cut.jl")
-#include("alg/ne-tasseff_cut.jl")
-#include("util/check_physical_solution.jl")
-#include("util/get_physical_solution.jl")
-
 include("core/export.jl")
 
 end

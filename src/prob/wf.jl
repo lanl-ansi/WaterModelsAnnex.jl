@@ -48,6 +48,30 @@ function WM.build_wf(wm::AbstractCDModel)
         WM.constraint_on_off_pump_power(wm, a)
     end
 
+    # Constraints on short pipe flows and heads.
+    for (a, regulator) in WM.ref(wm, :regulator)
+        WM.constraint_on_off_regulator_head(wm, a)
+        WM.constraint_on_off_regulator_flow(wm, a)
+    end
+
+    # Constraints on short pipe flows and heads.
+    for (a, short_pipe) in WM.ref(wm, :short_pipe)
+        WM.constraint_short_pipe_head(wm, a)
+        WM.constraint_short_pipe_flow(wm, a)
+    end
+
+    # Constraints on tank volumes.
+    for (i, tank) in ref(wm, :tank)
+        # Set the initial tank volume.
+        WM.constraint_tank_volume(wm, i)
+    end
+
+    # Constraints on valve flows and heads.
+    for (a, valve) in WM.ref(wm, :valve)
+        WM.constraint_on_off_valve_head(wm, a)
+        WM.constraint_on_off_valve_flow(wm, a)
+    end
+
     # Add the objective.
     WM.objective_wf(wm)
 end
