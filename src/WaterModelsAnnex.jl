@@ -30,4 +30,6 @@ include("prob/wf.jl")
 
 include("core/export.jl")
 
+include("alg/solve_owf.jl")
+
 end

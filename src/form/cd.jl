@@ -199,6 +199,7 @@ function constraint_strong_duality(wm::AbstractCDModel)
         q_tank = WM.var(wm, n, :q_tank)
         qp_pump = WM.var(wm, n, :qp_pump)
         g_pump = WM.var(wm, n, :g_pump)
+        z_pump = WM.var(wm, n, :z_pump)
         
         for (a, pipe) in WM.ref(wm, n, :pipe)
             L_x_r = pipe["length"] * WM._calc_pipe_resistance(pipe, pipe_type, viscosity, base_length, base_time)
@@ -223,13 +224,13 @@ function constraint_strong_duality(wm::AbstractCDModel)
             push!(f_5, JuMP.@NLexpression(wm.model, c[1] / 3.0 * qp_pump[a]^3 +
                 0.5 * c[2] * qp_pump[a]^2 + c[3] * qp_pump[a]))
 
-            push!(f_6, JuMP.@NLexpression(wm.model,
+            push!(f_6, JuMP.@NLexpression(wm.model, z_pump[a] * (
                 (-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
                 c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
                 c[1] * g_pump[a] + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *
                 (-sqrt(-4.0 *c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
                 c[2])) / (2.0 * c[1]) - (g_pump[a] * (-sqrt(-4.0 * c[1] * c[3] +
-                4.0 * c[1] * g_pump[a] + c[2]^2) - c[2])) / (2.0 * c[1])))
+                4.0 * c[1] * g_pump[a] + c[2]^2) - c[2])) / (2.0 * c[1]))))
         end
 
         for (i, res) in WM.ref(wm, n, :reservoir)
