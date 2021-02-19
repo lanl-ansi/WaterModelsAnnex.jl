@@ -3,7 +3,8 @@
 
 "Create flow variables that are common to all directed flow models for a component."
 function WM._variable_component_flow(
-    wm::AbstractCDModel, component_name::String; nw::Int=wm.cnw,
+    wm::AbstractCDModel, component_name::String;
+    nw::Int=WM._IM.nw_id_default,
     bounded::Bool=true, report::Bool=true)
     # Store the corresponding component symbol.
     comp_sym = Symbol(component_name)
@@ -48,7 +49,7 @@ end
 
 
 "Create flow-related variables common to all directed flow models for node-connecting components."
-function WM.variable_flow(wm::AbstractCDModel; nw::Int=wm.cnw, bounded::Bool=true, report::Bool=true)
+function WM.variable_flow(wm::AbstractCDModel; nw::Int=WM._IM.nw_id_default, bounded::Bool=true, report::Bool=true)
     for name in ["des_pipe", "pipe", "pump", "regulator", "short_pipe", "valve"]
         # Create directed flow (`qp` and `qn`) variables for each component.
         WM._variable_component_flow(wm, name; nw=nw, bounded=bounded, report=report)

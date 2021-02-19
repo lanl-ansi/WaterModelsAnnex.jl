@@ -27,9 +27,11 @@ include("core/function.jl")
 
 include("form/cd.jl")
 include("prob/wf.jl")
+include("prob/owfh.jl")
 
 include("core/export.jl")
 
+include("alg/simulate.jl")
 include("alg/solve_owf.jl")
 
 end

@@ -29,16 +29,16 @@ function WM.build_wf(wm::AbstractCDModel)
         WM.constraint_pipe_head(wm, a)
     end
 
-    # Selection of design pipes along unique arcs.
-    for (k, arc) in WM.ref(wm, :des_pipe_arc)
-        WM.constraint_des_pipe_head(wm, k, arc[1], arc[2])
-        WM.constraint_des_pipe_selection(wm, k, arc[1], arc[2])
-    end
-
     # Constraints on design pipe flows, heads, and physics.
     for (a, des_pipe) in WM.ref(wm, :des_pipe)
         WM.constraint_on_off_des_pipe_head(wm, a)
         WM.constraint_on_off_des_pipe_flow(wm, a)
+    end
+
+    # Selection of design pipes along unique arcs.
+    for (k, arc) in WM.ref(wm, :des_pipe_arc)
+        WM.constraint_des_pipe_head(wm, k, arc[1], arc[2])
+        WM.constraint_des_pipe_selection(wm, k, arc[1], arc[2])
     end
 
     # Constraints on pump flows and heads.
@@ -60,17 +60,20 @@ function WM.build_wf(wm::AbstractCDModel)
         WM.constraint_short_pipe_flow(wm, a)
     end
 
-    # Constraints on tank volumes.
-    for (i, tank) in ref(wm, :tank)
-        # Set the initial tank volume.
-        WM.constraint_tank_volume(wm, i)
-    end
-
     # Constraints on valve flows and heads.
     for (a, valve) in WM.ref(wm, :valve)
         WM.constraint_on_off_valve_head(wm, a)
         WM.constraint_on_off_valve_flow(wm, a)
     end
+
+    # Constraints on tank volumes.
+    for (i, tank) in WM.ref(wm, :tank)
+        # Set the initial tank volume.
+        WM.constraint_tank_volume(wm, i)
+    end
+
+    # Add the strong duality constraint.
+    constraint_strong_duality(wm)
 
     # Add the objective.
     WM.objective_wf(wm)
