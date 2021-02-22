@@ -82,12 +82,32 @@ function build_mn_owfh(wm::WM.AbstractWaterModel)
             WM.constraint_on_off_valve_head(wm, a; nw=n)
             WM.constraint_on_off_valve_flow(wm, a; nw=n)
         end
+    end
 
-        # Constraints on tank volumes.
-        for (i, tank) in WM.ref(wm, :tank; nw=n)
-            # Set the state of the tank.
-            WM.constraint_tank_volume(wm, i; nw=n)
-        end
+    # Get all network IDs in the multinetwork.
+    network_ids = sort(collect(WM.nw_ids(wm)))
+
+    # Start with the first network, representing the initial time step.
+    n_1, n_f = network_ids[1], network_ids[end]
+
+    # Constraints on tank volumes.
+    for (i, tank) in WM.ref(wm, :tank; nw = n_1)
+        # Set initial conditions of tanks.
+        WM.constraint_tank_volume(wm, i; nw = n_1)
+    end
+
+    # # Constraints on tank volumes.
+    # for n_2 in network_ids[2:end]
+    #     # Constrain tank volumes after the initial time step.
+    #     for (i, tank) in WM.ref(wm, :tank; nw = n_2)
+    #         WM.constraint_tank_volume(wm, i, n_1, n_2)
+    #     end
+
+    #     n_1 = n_2 # Update the first network used for integration.
+    # end
+
+    for i in WM.ids(wm, n_f, :tank)
+        WM.constraint_tank_volume_recovery(wm, i, n_1, n_f)
     end
 
     # Add the optimal water flow objective.

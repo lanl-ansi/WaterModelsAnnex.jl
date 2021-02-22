@@ -225,7 +225,7 @@ function constraint_strong_duality(wm::AbstractCDModel)
             push!(f_5, JuMP.@NLexpression(wm.model, c[1] / 3.0 * qp_pump[a]^3 +
                 0.5 * c[2] * qp_pump[a]^2 + c[3] * qp_pump[a]))
 
-            push!(f_6, JuMP.@NLexpression(wm.model, z_pump[a] * (
+            push!(f_6, JuMP.@NLexpression(wm.model, pump["status"] * (
                 (-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
                 c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
                 c[1] * g_pump[a] + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *
@@ -257,15 +257,24 @@ function constraint_strong_duality(wm::AbstractCDModel)
 
         for (i, tank) in WM.ref(wm, n, :tank)
             # TODO: How should we convexify this?
-            push!(f_4, JuMP.@NLexpression(wm.model, -q_tank[i] * h[tank["node"]]))
+            head = tank["init_level"] + WM.ref(wm, n, :node, tank["node"])["elevation"]
+            push!(f_4, JuMP.@NLexpression(wm.model, -q_tank[i] * head))
         end
     end
 
-    JuMP.@NLconstraint(wm.model,
+    JuMP.@NLobjective(wm.model, MOI.MIN_SENSE,
         sum(f_1[k] for k in 1:length(f_1)) -
         sum(f_2[k] for k in 1:length(f_2)) +
         sum(f_3[k] for k in 1:length(f_3)) +
         sum(f_4[k] for k in 1:length(f_4)) -
         sum(f_5[k] for k in 1:length(f_5)) +
-        sum(f_6[k] for k in 1:length(f_6)) <= 0.0)
+        sum(f_6[k] for k in 1:length(f_6)))
+
+    # JuMP.@NLconstraint(wm.model,
+    #     sum(f_1[k] for k in 1:length(f_1)) -
+    #     sum(f_2[k] for k in 1:length(f_2)) +
+    #     sum(f_3[k] for k in 1:length(f_3)) +
+    #     sum(f_4[k] for k in 1:length(f_4)) -
+    #     sum(f_5[k] for k in 1:length(f_5)) +
+    #     sum(f_6[k] for k in 1:length(f_6)) <= 0.0)
 end
