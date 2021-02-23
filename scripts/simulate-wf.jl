@@ -14,6 +14,7 @@ Memento.setlevel!(Memento.getlogger(WM._IM), "error")
 env = Gurobi.Env();
 gurobi = JuMP.optimizer_with_attributes(() -> Gurobi.Optimizer(env), "OutputFlag" => 0, "MIPGap" => 0.0);
 gurobi_owf = JuMP.optimizer_with_attributes(() -> Gurobi.Optimizer(env), "MIPGap" => 0.0, "TimeLimit" => 120.0);
+gurobi_short = JuMP.optimizer_with_attributes(() -> Gurobi.Optimizer(env), "MIPGap" => 0.0, "TimeLimit" => 5.0);
 ipopt = JuMP.optimizer_with_attributes(Ipopt.Optimizer, "print_level" => 0, "sb" => "yes", "linear_solver" => "ma57");
 
 # Suppress warnings during testing.
@@ -39,8 +40,7 @@ WM.correct_network_data!(network);
 
 # Specify the network and multinetwork datasets.
 WM._IM.update_data!(network_mn, result_heur["solution"]);
-WM.set_start_all!(network_mn);
-# WM.turn_on_all_components!(network_mn);
+
 
 network_path = "examples/data/epanet/van_zyl.inp"
 network = WM.parse_file(network_path);
@@ -59,8 +59,10 @@ schedules = calc_possible_schedules(network, ipopt);
 weights = solve_heuristic_problem(network, schedules, gurobi);
 result_heur = solve_heuristic_master(network, schedules, weights, ipopt, gurobi);
 
-
-schedules = calc_possible_schedules(network, ipopt);
+WM._IM.update_data!(network_mn, result_heur["solution"]);
+WM.set_start_all!(network_mn);
+# WM.turn_on_all_components!(network_mn);
+result = WM.solve_mn_owf(network_mn, WM.LRDWaterModel, gurobi_short; ext = ext);
 
 # # Reload the network data.
 # network = WM.parse_file(network_path);
