@@ -3,10 +3,10 @@ function WM.build_wf(wm::AbstractCDModel)
     WM._function_head_loss(wm)
 
     # Physical variables.
-    WM.variable_flow(wm; bounded = true)
-    WM.variable_head(wm; bounded = true)
-    WM.variable_pump_head_gain(wm; bounded = true)
-    WM.variable_pump_power(wm; bounded = true)
+    WM.variable_flow(wm)
+    WM.variable_head(wm)
+    WM.variable_pump_head_gain(wm)
+    WM.variable_pump_power(wm)
 
     # Indicator (status) variables.
     WM.variable_des_pipe_indicator(wm)

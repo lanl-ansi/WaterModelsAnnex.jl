@@ -34,9 +34,10 @@ function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimize
 
     for schedule in schedules[2]
         for (i, var) in enumerate(schedules[1])
-            comp = data[string(var.component_type)][string(var.component_index)]
+            comp_type = string(var.component_type)
+            comp_index = string(var.component_index)
+            comp = data[comp_type][comp_index]
             comp["status"] = Int(schedule[i])
-            comp["z_min"] = comp["z_max"] = Int(schedule[i])
         end
 
         WM.fix_all_indicators!(data)
@@ -65,15 +66,15 @@ function calc_possible_schedules(network::Dict{String, <:Any}, optimizer)
     # Create a deep copy of the network data.
     network_tmp = deepcopy(network)
 
+    # Set tank heads to the median level across all time steps.
+    #_set_median_tank_heads!(network_tmp)
+
     # Create the multinetwork version of the network.
     network_mn = WM.make_multinetwork(network_tmp);
 
     # Get all component schedules across all possible time steps.
-    wm = WM.instantiate_model(network_mn, WM.NCWaterModel, WM.build_mn_wf)
+    wm = WM.instantiate_model(network_mn, CDWaterModel, WM.build_mn_wf)
     schedules = create_all_schedules(wm)
-
-    # Set tank heads to the median level across all time steps.
-    WaterModelsAnnex._set_median_tank_heads!(network_tmp)
 
     for n in sort(collect(keys(schedules)))
         # Simulate schedules and filter the solutions.
@@ -99,12 +100,13 @@ function solve_heuristic_problem(network::Dict{String, <:Any}, schedules, optimi
 
     # Initialize the tank head variables
     h = Dict{Int, Any}(n => JuMP.@variable(
-        model, [i in keys(ref[:it][WM.wm_it_sym][:nw][n][:tank])])
+        model,[i in keys(ref[:it][WM.wm_it_sym][:nw][n][:tank])])
         for n in nw_ids)
 
     lambda = Dict{Int, Any}(n => JuMP.@variable(
         model, [k in 1:length(schedules[n][2])],
-        lower_bound = 0.0, upper_bound = 1.0) for n in nw_ids)
+        lower_bound = 0.0, upper_bound = 1.0, start = 1.0)
+        for n in nw_ids)
 
     for n in nw_ids
         JuMP.@constraint(model, sum(lambda[n]) == 1.0)
@@ -116,26 +118,26 @@ function solve_heuristic_problem(network::Dict{String, <:Any}, schedules, optimi
             node = ref[:it][WM.wm_it_sym][:nw][n][:node][tank["node"]]
 
             if n == 1
-                #head = node["elevation"] + tank["min_level"] + 0.5 * (tank["max_level"] - tank["min_level"])
-                head = tank["init_level"] + node["elevation"]
+                head = node["elevation"] + tank["init_level"]
                 JuMP.set_lower_bound(h[n][i], head)
                 JuMP.set_upper_bound(h[n][i], head)
-            else
+            end
+
+            if n < nw_ids[end]
                 dh_sum = JuMP.AffExpr(0.0)
 
-                for k in 1:length(lambda[n-1])
-                    q_tank = schedules[n-1][2][k][2]["tank"][string(i)]
-                    dh_sum += q_tank * lambda[n-1][k] / surface_area * time_step
+                for k in 1:length(lambda[n])
+                    q_tank = schedules[n][2][k][2]["tank"][string(i)]
+                    dh_sum += q_tank * lambda[n][k] / surface_area * time_step
                 end
 
-                JuMP.@constraint(model, h[n-1][i] - dh_sum == h[n][i])
+                JuMP.@constraint(model, h[n][i] - dh_sum == h[n+1][i])
                 JuMP.set_lower_bound(h[n][i], node["head_min"])
                 JuMP.set_upper_bound(h[n][i], node["head_max"])
             end
 
             if n == nw_ids[end]
-                #head = node["elevation"] + tank["min_level"] + 0.5 * (tank["max_level"] - tank["min_level"])
-                head = tank["init_level"] + node["elevation"]
+                head = node["elevation"] + tank["init_level"]
                 JuMP.set_lower_bound(h[n][i], head)
                 JuMP.set_upper_bound(h[n][i], node["head_max"])
             end
@@ -171,7 +173,7 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
     previous_sols = Array{Dict{Int, Any}}([])
     n_min = Array{Int64}([])
 
-    while feasible == false && num_iterations <= 1000
+    while feasible == false && num_iterations <= 100
         model = JuMP.Model()
         cost_1 = JuMP.@expression(model, 0.0)
         costs_2 = [JuMP.AffExpr(0.0) for i in 1:length(schedules[1][1])]
@@ -219,10 +221,8 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
         JuMP.optimize!(model)
 
         num_iterations += 1
-        println(num_iterations, " ", JuMP.objective_value(model))
-
         sol = Dict{Int, Any}(n => round.(JuMP.value.(z[n])) for n in nw_ids)
-        WaterModelsAnnex.simulate!(network, schedules, sol, result_mn, nlp_optimizer)
+        simulate!(network, schedules, sol, result_mn, nlp_optimizer)
         feasible = result_mn["primal_status"] === FEASIBLE_POINT
 
         if result_mn["last_nw"] !== nothing
