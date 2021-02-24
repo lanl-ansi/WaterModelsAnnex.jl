@@ -221,7 +221,7 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
         JuMP.optimize!(model)
 
         num_iterations += 1
-        sol = Dict{Int, Any}(n => round.(JuMP.value.(z[n])) for n in nw_ids)
+        sol = Dict{Int, Any}(n => [round(JuMP.value(z[n][k])) for k in 1:length(schedules[1][1])] for n in nw_ids)
         simulate!(network, schedules, sol, result_mn, nlp_optimizer)
         feasible = result_mn["primal_status"] === FEASIBLE_POINT
 

@@ -15,6 +15,7 @@ function simulate!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, optim
 
     # Add control time series information from `result` to `data`.
     _update_control_time_series!(data_tmp, result_tmp)
+    println(data_tmp["time_series"]["pump"])
 
     for n in 1:data_tmp["time_series"]["num_steps"]
         # Load and fix data at the current time step.
@@ -28,10 +29,10 @@ function simulate!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, optim
         result_tmp["primal_status"] = result_n["primal_status"]
         result_tmp["dual_status"] = result_n["dual_status"]
 
-        println(result_n["termination_status"])
+        println(result_n["termination_status"], " ", result_n["objective"], " ", result_n["primal_status"])
 
         # TODO: Use objective-based feasibility test.
-        if result_n["objective"] > 1.0e-6 || result_n["primal_status"] !== FEASIBLE_POINT
+        if result_n["objective"] > 1.0e-6 || !(result_n["primal_status"] in [FEASIBLE_POINT, NEARLY_FEASIBLE_POINT])
             result_tmp["primal_status"] = INFEASIBLE_POINT
         end
 
@@ -39,7 +40,7 @@ function simulate!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, optim
         WM._IM.update_data!(result_tmp["solution"]["nw"][string(n)], result_n["solution"])
 
         # If the problem is not feasible, exit the loop.
-        if result_n["primal_status"] !== FEASIBLE_POINT
+        if !(result_n["primal_status"] in [FEASIBLE_POINT, NEARLY_FEASIBLE_POINT])
             result_tmp["termination_status"] = result_n["termination_status"]
             result_tmp["primal_status"] = result_n["primal_status"]
             result_tmp["dual_status"] = result_n["dual_status"]
@@ -82,13 +83,15 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
                 if haskey(result_n["solution"], "pump") && haskey(result_n["solution"]["pump"], a)
                     continue
                 elseif haskey(result_n["solution"], "pump") && !haskey(result_n["solution"]["pump"], a)
-                    for (key, value) in pump
-                        pump[key] = 0.0
-                    end
+                    pump["status"] = 0
+                    # for (key, value) in pump
+                    #     pump[key] = 0.0
+                    # end
                 else
-                    for (key, value) in pump
-                        pump[key] = 0.0
-                    end
+                    pump["status"] = 0
+                    # for (key, value) in pump
+                    #     pump[key] = 0.0
+                    # end
                 end
             end
         end
@@ -98,13 +101,15 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
                 if haskey(result_n["solution"], "valve") && haskey(result_n["solution"]["valve"], a)
                     continue
                 elseif haskey(result_n["solution"], "valve") && !haskey(result_n["solution"]["valve"], a)
-                    for (key, value) in valve
-                        valve[key] = 0.0
-                    end
+                    valve["status"] = 0
+                    # for (key, value) in valve
+                    #     valve[key] = 0.0
+                    # end
                 else
-                    for (key, value) in valve
-                        valve[key] = 0.0
-                    end
+                    valve["status"] = 0
+                    # for (key, value) in valve
+                    #     valve[key] = 0.0
+                    # end
                 end
             end
         end
@@ -123,8 +128,10 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
             result_mn["last_nw"] = nothing
         end
 
-        # Update tank heads for the next time step using the current solution.
-        _update_initial_tank_heads!(data_tmp, result_n)
+        if n < data["time_series"]["num_steps"]
+            # Update tank heads for the next time step using the current solution.
+            _update_initial_tank_heads!(data_tmp, result_n)
+        end
     end
 
     if result_mn["primal_status"] === FEASIBLE_POINT
@@ -243,7 +250,6 @@ end
 
 function _update_initial_tank_heads!(data::Dict{String, <:Any}, result::Dict{String, <:Any})
     for (i, tank) in data["tank"]
-        #println(tank["init_level"], " ", tank["min_level"], " ", tank["max_level"])
         dV = result["solution"]["tank"][i]["q"] * data["time_series"]["time_step"]
         tank["init_level"] -= dV / (0.25 * pi * tank["diameter"]^2)
     end
