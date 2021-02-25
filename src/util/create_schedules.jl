@@ -29,7 +29,7 @@ function create_all_schedules(wm::WM.AbstractWaterModel)
 end
 
 
-function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimizer)
+function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimizer::Any)
     schedule_result = Array{Tuple}([])
 
     for schedule in schedules[2]
@@ -37,17 +37,23 @@ function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimize
             comp_type = string(var.component_type)
             comp_index = string(var.component_index)
             comp = data[comp_type][comp_index]
-            comp["status"] = Int(schedule[i])
+            comp["status"] = WM.STATUS(schedule[i])
         end
 
         WM.fix_all_indicators!(data)
-        result = WM.solve_wf(data, CDWaterModel, optimizer; relax_integrality = true)
+        result = WM.solve_wf(data, CDWaterModel,
+            optimizer; relax_integrality = true)
 
-        if result["objective"] > 1.0e-6 || result["primal_status"] !== FEASIBLE_POINT
+        objective_small = result["objective"] <= 1.0e-6
+        status_feasible = result["primal_status"] === FEASIBLE_POINT
+
+        if !(objective_small && status_feasible)
             result["primal_status"] = INFEASIBLE_POINT
         end
 
-        if haskey(result["solution"], "pump") && length(result["solution"]["pump"]) > 0
+        solution_has_pumps = haskey(result["solution"], "pump")
+
+        if solution_has_pumps && length(result["solution"]["pump"]) > 0
             cost = sum(pump["c"] for (a, pump) in result["solution"]["pump"])
         else
             cost = 0.0 # If there are no pumps, the cost must be zero.
@@ -62,12 +68,9 @@ function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimize
 end
 
 
-function calc_possible_schedules(network::Dict{String, <:Any}, optimizer)
+function calc_possible_schedules(network::Dict{String, <:Any}, optimizer::Any)
     # Create a deep copy of the network data.
     network_tmp = deepcopy(network)
-
-    # Set tank heads to the median level across all time steps.
-    #_set_median_tank_heads!(network_tmp)
 
     # Create the multinetwork version of the network.
     network_mn = WM.make_multinetwork(network_tmp);
@@ -80,7 +83,7 @@ function calc_possible_schedules(network::Dict{String, <:Any}, optimizer)
         # Simulate schedules and filter the solutions.
         WM._IM.load_timepoint!(network_tmp, n)
         results = simulate_schedules(network_tmp, schedules[n], optimizer)
-        ids = filter(k -> results[k][1] !== INFEASIBLE_POINT, 1:length(results))
+        ids = filter(k -> results[k][1] === FEASIBLE_POINT, 1:length(results))
         schedules[n] = (schedules[n][1], [(schedules[n][2][i], results[i][2]) for i in ids])
     end
 
@@ -100,7 +103,7 @@ function solve_heuristic_problem(network::Dict{String, <:Any}, schedules, optimi
 
     # Initialize the tank head variables
     h = Dict{Int, Any}(n => JuMP.@variable(
-        model,[i in keys(ref[:it][WM.wm_it_sym][:nw][n][:tank])])
+        model, [i in keys(ref[:it][WM.wm_it_sym][:nw][n][:tank])])
         for n in nw_ids)
 
     lambda = Dict{Int, Any}(n => JuMP.@variable(
@@ -173,7 +176,7 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
     previous_sols = Array{Dict{Int, Any}}([])
     n_min = Array{Int64}([])
 
-    while feasible == false && num_iterations <= 100
+    while !feasible && num_iterations <= 100
         model = JuMP.Model()
         cost_1 = JuMP.@expression(model, 0.0)
         costs_2 = [JuMP.AffExpr(0.0) for i in 1:length(schedules[1][1])]
@@ -219,15 +222,17 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
         JuMP.@objective(model, MOI.MIN_SENSE, cost_1 + cost_2)
         JuMP.set_optimizer(model, optimizer)
         JuMP.optimize!(model)
-
         num_iterations += 1
-        sol = Dict{Int, Any}(n => [round(JuMP.value(z[n][k])) for k in 1:length(schedules[1][1])] for n in nw_ids)
+
+        sol = Dict{Int, Any}(n => [round(JuMP.value(z[n][k])) for
+            k in 1:length(schedules[1][1])] for n in nw_ids)
+
         simulate!(network, schedules, sol, result_mn, nlp_optimizer)
         feasible = result_mn["primal_status"] === FEASIBLE_POINT
 
         if result_mn["last_nw"] !== nothing
             push!(n_min, result_mn["last_nw"])
-        elseif feasible == true
+        elseif feasible
             delete!(result_mn, "last_nw")
         end
     end

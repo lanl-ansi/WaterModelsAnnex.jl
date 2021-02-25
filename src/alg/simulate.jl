@@ -4,6 +4,16 @@ function simulate(path::String, optimizer)
 end
 
 
+"Simulates a network dataset `data`, by solving a sequence of convex programs using `optimizer`."
+function simulate!(data::Dict{String, <:Any}, optimizer::Any)
+    for time_step_index in 1:data["time_series"]["num_steps"]
+        WM._IM.load_timepoint!(data, time_step_index)
+        result = WM.solve_wf(data, CDWaterModel, optimizer)
+        update_tank_heads!(data, result["solution"])
+    end
+end
+
+
 "Simulates a network dataset, `data`, with controls in `result`, by solving a sequence of convex programs using `optimizer`."
 function simulate!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, optimizer)
     data_tmp = deepcopy(data)
@@ -21,7 +31,7 @@ function simulate!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, optim
         # Load and fix data at the current time step.
         WM._IM.load_timepoint!(data_tmp, n)
         WM.fix_all_indicators!(data_tmp)
-        println(n, " ", data_tmp["tank"]["1"]["init_level"], " ", data_tmp["tank"]["1"]["max_level"])
+        #println(n, " ", data_tmp["tank"]["1"]["init_level"], " ", data_tmp["tank"]["1"]["max_level"])
 
         # Solve the single time period subproblem.
         result_n = WM.solve_wf(data_tmp, CDWaterModel, optimizer; relax_integrality = true)
@@ -65,7 +75,7 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
     # Add control time series information from `result` to `data`.
     _update_control_time_series!(data_tmp, schedules, result)
 
-    for n in 1:data["time_series"]["num_steps"]
+    for n in 1:data["time_series"]["num_steps"]        
         # Load and fix data at the current time step.
         WM._IM.load_timepoint!(data_tmp, n)
         WM.fix_all_indicators!(data_tmp)
@@ -75,7 +85,6 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
         result_mn["termination_status"] = result_n["termination_status"]
         result_mn["primal_status"] = result_n["primal_status"]
         result_mn["dual_status"] = result_n["dual_status"]
-
         sol_nw = result_mn["solution"]["nw"][string(n)]
 
         if haskey(sol_nw, "pump")
@@ -83,12 +92,12 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
                 if haskey(result_n["solution"], "pump") && haskey(result_n["solution"]["pump"], a)
                     continue
                 elseif haskey(result_n["solution"], "pump") && !haskey(result_n["solution"]["pump"], a)
-                    pump["status"] = 0
+                    pump["status"] = WM.STATUS_INACTIVE
                     # for (key, value) in pump
                     #     pump[key] = 0.0
                     # end
                 else
-                    pump["status"] = 0
+                    pump["status"] = WM.STATUS_INACTIVE
                     # for (key, value) in pump
                     #     pump[key] = 0.0
                     # end
@@ -101,12 +110,12 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
                 if haskey(result_n["solution"], "valve") && haskey(result_n["solution"]["valve"], a)
                     continue
                 elseif haskey(result_n["solution"], "valve") && !haskey(result_n["solution"]["valve"], a)
-                    valve["status"] = 0
+                    valve["status"] = WM.STATUS_INACTIVE
                     # for (key, value) in valve
                     #     valve[key] = 0.0
                     # end
                 else
-                    valve["status"] = 0
+                    valve["status"] = WM.STATUS_INACTIVE
                     # for (key, value) in valve
                     #     valve[key] = 0.0
                     # end
@@ -115,6 +124,36 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
         end
 
         WM._IM.update_data!(result_mn["solution"]["nw"][string(n)], result_n["solution"])
+
+        # WM._IM.update_data!(result_mn["solution"]["nw"][string(n)], result_n["solution"])
+
+        # if haskey(sol_nw, "pump")
+        #     for (a, pump) in sol_nw["pump"]
+        #         if haskey(result_n["solution"], "pump") && haskey(result_n["solution"]["pump"], a)
+        #             println(result_n[])
+        #             pump["status"] = WM.STATUS(Int(round(result_n["solution"]["pump"][a]["status"])))
+        #         elseif haskey(result_n["solution"], "pump") && !haskey(result_n["solution"]["pump"], a)
+        #             pump["status"] = WM.STATUS_INACTIVE
+        #         else
+        #             pump["status"] = WM.STATUS_INACTIVE
+        #         end
+        #     end
+
+        #     println(data_tmp["pump"]["1"]["status"])
+        #     println(result_mn["solution"]["nw"][string(n)]["pump"]["1"]["status"])
+        # end
+
+        # if haskey(sol_nw, "valve")
+        #     for (a, valve) in sol_nw["valve"]
+        #         if haskey(result_n["solution"], "valve") && haskey(result_n["solution"]["valve"], a)
+        #             valve["status"] = WM.STATUS(Int(round(valve["status"])))
+        #         elseif haskey(result_n["solution"], "valve") && !haskey(result_n["solution"]["valve"], a)
+        #             valve["status"] = WM.STATUS_INACTIVE
+        #         else
+        #             valve["status"] = WM.STATUS_INACTIVE
+        #         end
+        #     end
+        # end
 
         if result_n["objective"] > 1.0e-6 || result_n["primal_status"] !== FEASIBLE_POINT
             result_mn["primal_status"] = INFEASIBLE_POINT
@@ -217,25 +256,30 @@ function _update_control_time_series!(data::Dict{String, <:Any}, result::Dict{St
 end
 
 
-function _update_tank_time_series!(data::Dict{String, <:Any}, result::Dict{String, <:Any})
+function _update_tank_time_series!(data::Dict{String, <:Any}, result_mn::Dict{String, <:Any})
     if !haskey(data["time_series"], "tank")
+        # Initialize the tank time series dictionary.
         data["time_series"]["tank"] = Dict{String, Any}()
     end
 
-    nw_ids = sort([parse(Int, x) for x in keys(result["solution"]["nw"])])
+    # Get the network indices in the result dictionary.
+    nw_ids = sort([parse(Int64, n) for n in keys(result_mn["solution"]["nw"])])
+
+    # Get the relevant piece of the result dictionary.
+    sol = result_mn["solution"]["nw"]
 
     for (i, tank) in data["tank"]
-        sol = result["solution"]["nw"]
-
+        # Initialize the tank time series dictionary.
         if !haskey(data["time_series"]["tank"], i)
             data["time_series"]["tank"][i] = Dict{String, Any}()
         end
 
+        # Compute the volume and level time series.
         V = Array{Int64, 1}([Int(round(sol[string(n)]["tank"][i]["V"])) for n in nw_ids])
-        surface_area = 0.25 * pi * tank["diameter"]^2
-        init_level = V ./ surface_area
+        init_levels = V ./ (0.25 * pi * tank["diameter"]^2)
 
-        data["time_series"]["tank"][i]["init_level"] = init_level
+        # Store the tank's initial level data in the time series.
+        data["time_series"]["tank"][i]["init_level"] = init_levels
     end
 end
 
@@ -244,6 +288,14 @@ function _set_median_tank_heads!(data::Dict{String, <:Any})
     for (i, tank) in data["tank"]
         level_delta = 0.5 * (tank["max_level"] - tank["min_level"])
         tank["init_level"] = tank["min_level"] + level_delta
+    end
+end
+
+
+function update_tank_heads!(data::Dict{String, <:Any}, solution::Dict{String, <:Any})
+    for (i, tank) in data["tank"]
+        volume_change = solution["tank"][i]["q"] * data["time_series"]["time_step"]
+        tank["init_level"] -= volume_change / (0.25 * pi * tank["diameter"]^2)
     end
 end
 

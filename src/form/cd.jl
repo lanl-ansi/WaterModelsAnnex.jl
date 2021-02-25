@@ -219,13 +219,13 @@ function constraint_strong_duality(wm::AbstractCDModel)
         end
 
         for (a, pump) in WM.ref(wm, n, :pump)
-            @assert pump["head_curve_form"] in [WM.QUADRATIC, WM.BEST_EFFICIENCY_POINT, WM.LINEAR_POWER]
+            @assert pump["head_curve_form"] in [WM.PUMP_QUADRATIC, WM.PUMP_BEST_EFFICIENCY_POINT, WM.PUMP_LINEAR_POWER]
             c = WM._calc_head_curve_coefficients(pump)
             
             push!(f_5, JuMP.@NLexpression(wm.model, c[1] / 3.0 * qp_pump[a]^3 +
                 0.5 * c[2] * qp_pump[a]^2 + c[3] * qp_pump[a]))
 
-            push!(f_6, JuMP.@NLexpression(wm.model, pump["status"] * (
+            push!(f_6, JuMP.@NLexpression(wm.model, z_pump[a] * (
                 (-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
                 c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
                 c[1] * g_pump[a] + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *
