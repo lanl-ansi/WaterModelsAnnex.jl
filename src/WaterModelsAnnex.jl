@@ -24,8 +24,12 @@ end
 
 include("core/types.jl")
 include("core/function.jl")
+include("core/constraint_template.jl")
 
 include("form/cd.jl")
+include("form/cdx.jl")
+include("form/lrdx.jl")
+
 include("prob/wf.jl")
 include("prob/owfh.jl")
 

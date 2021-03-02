@@ -269,12 +269,4 @@ function constraint_strong_duality(wm::AbstractCDModel)
         sum(f_4[k] for k in 1:length(f_4)) -
         sum(f_5[k] for k in 1:length(f_5)) +
         sum(f_6[k] for k in 1:length(f_6)))
-
-    # JuMP.@NLconstraint(wm.model,
-    #     sum(f_1[k] for k in 1:length(f_1)) -
-    #     sum(f_2[k] for k in 1:length(f_2)) +
-    #     sum(f_3[k] for k in 1:length(f_3)) +
-    #     sum(f_4[k] for k in 1:length(f_4)) -
-    #     sum(f_5[k] for k in 1:length(f_5)) +
-    #     sum(f_6[k] for k in 1:length(f_6)) <= 0.0)
 end

@@ -33,19 +33,19 @@ function _d2fdh_cd(alpha::Float64)
 end
 
 
-function head_loss_args(wm::AbstractCDModel)
+function head_loss_args(wm::Union{AbstractCDModel, AbstractCDXModel})
     alpha_m1 = WM._get_alpha_min_1(wm)
     return (:head_loss, 1, _fq_cd(alpha_m1), _dfq_cd(alpha_m1), _d2fq_cd(alpha_m1))
 end
 
 
-function head_loss_dh_args(wm::AbstractCDModel)
+function head_loss_dh_args(wm::Union{AbstractCDModel, AbstractCDXModel})
     alpha_m1 = WM._get_alpha_min_1(wm)
     return (:head_loss_dh, 1, _fdh_cd(alpha_m1), _dfdh_cd(alpha_m1), _d2fdh_cd(alpha_m1))
 end
 
 
-function WM._function_head_loss(wm::AbstractCDModel)
+function WM._function_head_loss(wm::Union{AbstractCDModel, AbstractCDXModel})
     JuMP.register(wm.model, head_loss_args(wm)...)
     JuMP.register(wm.model, head_loss_dh_args(wm)...)
 end
