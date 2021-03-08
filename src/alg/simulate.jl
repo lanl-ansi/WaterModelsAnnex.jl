@@ -235,7 +235,7 @@ function _update_control_time_series!(data::Dict{String, <:Any}, result::Dict{St
             data["time_series"]["pump"][i] = Dict{String, Any}()
         end
 
-        statuses = Array{Int64, 1}([Int(round(sol[string(n)]["pump"][i]["status"])) for n in nw_ids])
+        statuses = Array{Int64, 1}([Int(sol[string(n)]["pump"][i]["status"]) for n in nw_ids])
         data["time_series"]["pump"][i]["status"] = Array{Int64, 1}(statuses)
         data["time_series"]["pump"][i]["z_min"] = Array{Int64, 1}(statuses)
         data["time_series"]["pump"][i]["z_max"] = Array{Int64, 1}(statuses)
@@ -248,7 +248,7 @@ function _update_control_time_series!(data::Dict{String, <:Any}, result::Dict{St
             data["time_series"]["valve"][i] = Dict{String, Any}()
         end
 
-        statuses = Array{Int64, 1}([Int(round(sol[string(n)]["valve"][i]["status"])) for n in nw_ids])
+        statuses = Array{Int64, 1}([Int(sol[string(n)]["valve"][i]["status"]) for n in nw_ids])
         data["time_series"]["valve"][i]["status"] = statuses
         data["time_series"]["valve"][i]["z_min"] = statuses
         data["time_series"]["valve"][i]["z_max"] = statuses
