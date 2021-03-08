@@ -204,10 +204,10 @@ function constraint_on_off_pump_gain_nonlinear(
     # Loop over breakpoints strictly between the lower and upper variable bounds.
     for pt in range(0.0, stop = JuMP.upper_bound(g), length = num_breakpoints)
         # Add a linear outer approximation of the convex relaxation at `pt`.
-        rhs = _calc_pump_gain_integrated_oa(g, z, pt, coeffs)
+        lhs = _calc_pump_gain_integrated_oa(g, z, pt, coeffs)
 
         # Add outer-approximation of the integrated head loss constraint.
-        c = JuMP.@constraint(wm.model, g_nl <= rhs)
+        c = JuMP.@constraint(wm.model, lhs <= g_nl)
 
         # Append the :pump_head_loss_integrated constraint array.
         append!(WM.con(wm, n, :on_off_pump_gain_nonlinear)[a], [c])
@@ -249,7 +249,7 @@ function constraint_strong_duality(wm::AbstractLRDXModel)
     qp_pump_nl = sum(sum(WM.var(wm, nw, :qp_nl_pump)) for nw in WM.nw_ids(wm))
     g_pump_nl = sum(sum(WM.var(wm, nw, :g_nl_pump)) for nw in WM.nw_ids(wm))
     qh_nl_tank = sum(sum(WM.var(wm, nw, :qh_nl_tank)) for nw in WM.nw_ids(wm))
-    pump_nl = qp_pump_nl + g_pump_nl
+    pump_nl = qp_pump_nl - g_pump_nl
 
     reservoir_sum, demand_sum = JuMP.AffExpr(0.0), JuMP.AffExpr(0.0)
 
