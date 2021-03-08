@@ -189,7 +189,13 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
     WM.variable_flow(wm)
     WM.variable_pump_head_gain(wm)
     WM.variable_pump_power(wm)
+
+    # Additional variables for nonlinearities.
     variable_pipe_flow_nonlinear(wm)
+    variable_pipe_head_difference_nonlinear(wm)
+    variable_pump_flow_nonlinear(wm)
+    variable_pump_gain_nonlinear(wm)
+    variable_tank_nonlinear(wm)
 
     # Indicator (status) variables.
     WM.variable_des_pipe_indicator(wm)
@@ -213,7 +219,9 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         WM.constraint_pipe_head(wm, a)
         WM.constraint_pipe_head_loss(wm, a)
         WM.constraint_pipe_flow(wm, a)
-        constraint_pipe_head_loss_integrated(wm, a)
+
+        constraint_pipe_flow_nonlinear(wm, a)
+        constraint_pipe_head_nonlinear(wm, a)
     end
 
     # Selection of design pipes along unique arcs.
@@ -236,6 +244,9 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         WM.constraint_on_off_pump_head_gain(wm, a)
         WM.constraint_on_off_pump_flow(wm, a)
         WM.constraint_on_off_pump_power(wm, a)
+
+        constraint_on_off_pump_flow_nonlinear(wm, a)
+        constraint_on_off_pump_gain_nonlinear(wm, a)
     end
 
     # Constraints on short pipe flows and heads.
@@ -254,6 +265,7 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
     for (i, tank) in WM.ref(wm, :tank)
         # Set the initial tank volume.
         WM.constraint_tank_volume(wm, i)
+        constraint_tank_nonlinear(wm, i)
     end
 
     # Constraints on valve flows and heads.
@@ -263,7 +275,7 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
     end
 
     # Add the strong duality constraint.
-    WM.constraint_strong_duality(wm)
+    constraint_strong_duality(wm)
 
     # Add the objective.
     WM.objective_wf(wm)
@@ -284,6 +296,9 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         # Additional variables for nonlinearities.
         variable_pipe_flow_nonlinear(wm; nw=n)
         variable_pipe_head_difference_nonlinear(wm; nw=n)
+        variable_pump_flow_nonlinear(wm; nw=n)
+        variable_pump_gain_nonlinear(wm; nw=n)
+        variable_tank_nonlinear(wm; nw=n)
 
         # Indicator (status) variables.
         WM.variable_des_pipe_indicator(wm; nw=n)
@@ -332,6 +347,9 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
             WM.constraint_on_off_pump_head_gain(wm, a; nw=n)
             WM.constraint_on_off_pump_flow(wm, a; nw=n)
             WM.constraint_on_off_pump_power(wm, a; nw=n)
+
+            constraint_on_off_pump_flow_nonlinear(wm, a; nw=n)
+            constraint_on_off_pump_gain_nonlinear(wm, a; nw=n)
         end
 
         # Constraints on short pipe flows and heads.
@@ -363,6 +381,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
     for (i, tank) in WM.ref(wm, :tank; nw = n_1)
         # Set initial conditions of tanks.
         WM.constraint_tank_volume(wm, i; nw = n_1)
+        constraint_tank_nonlinear(wm, i; nw = n_1)
     end
 
     # Constraints on tank volumes.
@@ -370,6 +389,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         # Constrain tank volumes after the initial time step.
         for (i, tank) in WM.ref(wm, :tank; nw = n_2)
             WM.constraint_tank_volume(wm, i, n_1, n_2)
+            constraint_tank_nonlinear(wm, i; nw = n_2)
         end
 
         n_1 = n_2 # Update the first network used for integration.
