@@ -49,8 +49,8 @@ function construct_owf_model(network::Dict{String, Any}, owf_optimizer)
     # Construct the OWF model.
     network_mn = WM.make_multinetwork(network)
     ext = Dict(:pipe_breakpoints => 3, :pump_breakpoints => 3)
-    #wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf; ext = ext)
-    wm = WM.instantiate_model(network_mn, CDWaterModel, WM.build_mn_owf; ext = ext)
+    wm = WM.instantiate_model(network_mn, LRDXWaterModel, WM.build_mn_owf; ext = ext)
+    #wm = WM.instantiate_model(network_mn, CDWaterModel, WM.build_mn_owf; ext = ext)
 
     # Constrain an auxiliary objective variable by the objective function.
     objective_function = WM.JuMP.objective_function(wm.model)
@@ -60,7 +60,7 @@ function construct_owf_model(network::Dict{String, Any}, owf_optimizer)
 
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, owf_optimizer)
-    #WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
 
     # Return the WaterModels object.
     return wm
@@ -105,9 +105,21 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
         add_pairwise_cuts(wm, pairwise_cuts)
     end
 
-    # Solve the OWF optimization problem.
-    result = WM.optimize_model!(wm)
+    # Find an initial feasible solution using a heuristic.
+    result = compute_initial_solution(network, obbt_optimizer, nlp_optimizer)
 
-    # Return the optimization result dictionary.
     return result
+
+    ## Solve the OWF optimization problem.
+    #result = WM.optimize_model!(wm)
+
+    # # Return the optimization result dictionary.
+    # return result
+end
+
+
+function compute_initial_solution(network::Dict{String, <:Any}, obbt_optimizer, nlp_optimizer)
+    schedules = calc_possible_schedules(network, nlp_optimizer)
+    weights = solve_heuristic_problem(network, schedules, obbt_optimizer)
+    return solve_heuristic_master(network, schedules, weights, nlp_optimizer, obbt_optimizer)
 end
