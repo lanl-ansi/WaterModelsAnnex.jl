@@ -20,8 +20,8 @@ function simulate!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, optim
     result_tmp = deepcopy(result)
 
     # Ensure data dictionaries have the required properties.
-    @assert WM._IM.ismultinetwork(data_tmp) == false
-    @assert haskey(data_tmp, "time_series") && haskey(data_tmp["time_series"], "num_steps")
+    @assert !WM._IM.ismultinetwork(data_tmp)
+    @assert haskey(data_tmp, "time_series")
 
     # Add control time series information from `result` to `data`.
     _update_control_time_series!(data_tmp, result_tmp)
@@ -31,7 +31,6 @@ function simulate!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, optim
         # Load and fix data at the current time step.
         WM._IM.load_timepoint!(data_tmp, n)
         WM.fix_all_indicators!(data_tmp)
-        #println(n, " ", data_tmp["tank"]["1"]["init_level"], " ", data_tmp["tank"]["1"]["max_level"])
 
         # Solve the single time period subproblem.
         result_n = WM.solve_wf(data_tmp, CDWaterModel, optimizer; relax_integrality = true)
@@ -70,12 +69,13 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
 
     # Ensure data dictionaries have the required properties.
     @assert WM._IM.ismultinetwork(data_tmp) == false
-    @assert haskey(data_tmp, "time_series") && haskey(data_tmp["time_series"], "num_steps")
+    @assert haskey(data_tmp, "time_series")
+    @assert haskey(data_tmp["time_series"], "num_steps")
 
     # Add control time series information from `result` to `data`.
     _update_control_time_series!(data_tmp, schedules, result)
 
-    for n in 1:data["time_series"]["num_steps"]        
+    for n in 1:data["time_series"]["num_steps"]
         # Load and fix data at the current time step.
         WM._IM.load_timepoint!(data_tmp, n)
         WM.fix_all_indicators!(data_tmp)
@@ -90,17 +90,11 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
         if haskey(sol_nw, "pump")
             for (a, pump) in sol_nw["pump"]
                 if haskey(result_n["solution"], "pump") && haskey(result_n["solution"]["pump"], a)
-                    continue
+                    pump["status"] = WM.STATUS(Int(round(result_n["solution"]["pump"][a]["status"])))
                 elseif haskey(result_n["solution"], "pump") && !haskey(result_n["solution"]["pump"], a)
                     pump["status"] = WM.STATUS_INACTIVE
-                    # for (key, value) in pump
-                    #     pump[key] = 0.0
-                    # end
                 else
                     pump["status"] = WM.STATUS_INACTIVE
-                    # for (key, value) in pump
-                    #     pump[key] = 0.0
-                    # end
                 end
             end
         end
@@ -108,52 +102,16 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
         if haskey(sol_nw, "valve")
             for (a, valve) in sol_nw["valve"]
                 if haskey(result_n["solution"], "valve") && haskey(result_n["solution"]["valve"], a)
-                    continue
+                    valve["status"] = WM.STATUS(Int(round(result_n["solution"]["valve"]["status"])))
                 elseif haskey(result_n["solution"], "valve") && !haskey(result_n["solution"]["valve"], a)
                     valve["status"] = WM.STATUS_INACTIVE
-                    # for (key, value) in valve
-                    #     valve[key] = 0.0
-                    # end
                 else
                     valve["status"] = WM.STATUS_INACTIVE
-                    # for (key, value) in valve
-                    #     valve[key] = 0.0
-                    # end
                 end
             end
         end
 
         WM._IM.update_data!(result_mn["solution"]["nw"][string(n)], result_n["solution"])
-
-        # WM._IM.update_data!(result_mn["solution"]["nw"][string(n)], result_n["solution"])
-
-        # if haskey(sol_nw, "pump")
-        #     for (a, pump) in sol_nw["pump"]
-        #         if haskey(result_n["solution"], "pump") && haskey(result_n["solution"]["pump"], a)
-        #             println(result_n[])
-        #             pump["status"] = WM.STATUS(Int(round(result_n["solution"]["pump"][a]["status"])))
-        #         elseif haskey(result_n["solution"], "pump") && !haskey(result_n["solution"]["pump"], a)
-        #             pump["status"] = WM.STATUS_INACTIVE
-        #         else
-        #             pump["status"] = WM.STATUS_INACTIVE
-        #         end
-        #     end
-
-        #     println(data_tmp["pump"]["1"]["status"])
-        #     println(result_mn["solution"]["nw"][string(n)]["pump"]["1"]["status"])
-        # end
-
-        # if haskey(sol_nw, "valve")
-        #     for (a, valve) in sol_nw["valve"]
-        #         if haskey(result_n["solution"], "valve") && haskey(result_n["solution"]["valve"], a)
-        #             valve["status"] = WM.STATUS(Int(round(valve["status"])))
-        #         elseif haskey(result_n["solution"], "valve") && !haskey(result_n["solution"]["valve"], a)
-        #             valve["status"] = WM.STATUS_INACTIVE
-        #         else
-        #             valve["status"] = WM.STATUS_INACTIVE
-        #         end
-        #     end
-        # end
 
         if result_n["objective"] > 1.0e-6 || result_n["primal_status"] !== FEASIBLE_POINT
             result_mn["primal_status"] = INFEASIBLE_POINT
@@ -274,9 +232,9 @@ function _update_tank_time_series!(data::Dict{String, <:Any}, result_mn::Dict{St
             data["time_series"]["tank"][i] = Dict{String, Any}()
         end
 
-        # Compute the volume and level time series.
-        V = Array{Int64, 1}([Int(round(sol[string(n)]["tank"][i]["V"])) for n in nw_ids])
-        init_levels = V ./ (0.25 * pi * tank["diameter"]^2)
+        elev = [data["node"][string(tank["node"])]["elevation"] for n in nw_ids]
+        head = [sol[string(n)]["node"][string(tank["node"])]["h"] for n in nw_ids]
+        init_levels = head .- elev
 
         # Store the tank's initial level data in the time series.
         data["time_series"]["tank"][i]["init_level"] = init_levels
@@ -284,10 +242,18 @@ function _update_tank_time_series!(data::Dict{String, <:Any}, result_mn::Dict{St
 end
 
 
+function _reset_controllable_component_statuses(data::Dict{String, <:Any})
+    for comp_type in ["pump", "regulator", "valve"]
+        map(x -> x["status"] = WM.STATUS_UNKNOWN, values(data[comp_type]))
+        map(x -> x["z_min"] = 0.0, values(data[comp_type]))
+        map(x -> x["z_max"] = 1.0, values(data[comp_type]))
+    end
+end
+
+
 function _set_median_tank_heads!(data::Dict{String, <:Any})
     for (i, tank) in data["tank"]
-        level_delta = 0.5 * (tank["max_level"] - tank["min_level"])
-        tank["init_level"] = tank["min_level"] + level_delta
+        tank["init_level"] = 0.5 * (tank["max_level"] + tank["min_level"])
     end
 end
 
@@ -303,6 +269,14 @@ end
 function _update_initial_tank_heads!(data::Dict{String, <:Any}, result::Dict{String, <:Any})
     for (i, tank) in data["tank"]
         dV = result["solution"]["tank"][i]["q"] * data["time_series"]["time_step"]
+        tank["init_level"] -= dV / (0.25 * pi * tank["diameter"]^2)
+    end
+end
+
+
+function _update_initial_tank_heads!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, time_step::Float64)
+    for (i, tank) in data["tank"]
+        dV = result["solution"]["tank"][i]["q"] * time_step
         tank["init_level"] -= dV / (0.25 * pi * tank["diameter"]^2)
     end
 end

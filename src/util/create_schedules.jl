@@ -41,13 +41,12 @@ function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimize
         end
 
         WM.fix_all_indicators!(data)
-        result = WM.solve_wf(data, CDWaterModel,
-            optimizer; relax_integrality = true)
+        result = WM.solve_wf(data, CDWaterModel, optimizer; relax_integrality = true)
 
-        objective_small = result["objective"] <= 1.0e-6
+        objective_is_small = result["objective"] <= 1.0e-6
         status_feasible = result["primal_status"] === FEASIBLE_POINT
 
-        if !(objective_small && status_feasible)
+        if !(objective_is_small && status_feasible)
             result["primal_status"] = INFEASIBLE_POINT
         end
 
@@ -68,24 +67,29 @@ function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimize
 end
 
 
-function calc_possible_schedules(network::Dict{String, <:Any}, optimizer::Any)
-    # Create a deep copy of the network data.
-    network_tmp = deepcopy(network)
-
+function calc_possible_schedules(network::Dict{String, <:Any}, mip_optimizer::Any, nlp_optimizer::Any)
     # Create the multinetwork version of the network.
-    network_mn = WM.make_multinetwork(network_tmp);
+    network_mn = WM.make_multinetwork(network)
+
+    # Solve a relaxation of the OWF to get an estimate of tank volume time series.
+    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
+    wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf; ext = ext)
+    result_mip = WM.optimize_model!(wm; optimizer = nlp_optimizer, relax_integrality = true)
 
     # Get all component schedules across all possible time steps.
-    wm = WM.instantiate_model(network_mn, CDWaterModel, WM.build_mn_wf)
     schedules = create_all_schedules(wm)
 
     for n in sort(collect(keys(schedules)))
         # Simulate schedules and filter the solutions.
-        WM._IM.load_timepoint!(network_tmp, n)
-        results = simulate_schedules(network_tmp, schedules[n], optimizer)
+        WM._IM.load_timepoint!(network, n) # Load data at time.
+        results = simulate_schedules(network, schedules[n], nlp_optimizer)
         ids = filter(k -> results[k][1] === FEASIBLE_POINT, 1:length(results))
         schedules[n] = (schedules[n][1], [(schedules[n][2][i], results[i][2]) for i in ids])
     end
+
+    # Reset the controllable component statuses.
+    WM._IM.load_timepoint!(network, 1)
+    _reset_controllable_component_statuses(network)
 
     # Return schedules with relevant solution properties.
     return schedules
@@ -103,13 +107,13 @@ function solve_heuristic_problem(network::Dict{String, <:Any}, schedules, optimi
 
     # Initialize the tank head variables
     h = Dict{Int, Any}(n => JuMP.@variable(
-        model, [i in keys(ref[:it][WM.wm_it_sym][:nw][n][:tank])])
-        for n in nw_ids)
+        model, [i in keys(ref[:it][WM.wm_it_sym][:nw][n][:tank])],
+        base_name = "h[$(n)]") for n in nw_ids)
 
     lambda = Dict{Int, Any}(n => JuMP.@variable(
         model, [k in 1:length(schedules[n][2])],
-        lower_bound = 0.0, upper_bound = 1.0, start = 1.0)
-        for n in nw_ids)
+        lower_bound = 0.0, upper_bound = 1.0, start = 1.0,
+        base_name = "lambda[$(n)]") for n in nw_ids)
 
     for n in nw_ids
         JuMP.@constraint(model, sum(lambda[n]) == 1.0)
@@ -157,8 +161,8 @@ end
 
 function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights, nlp_optimizer, optimizer)
     # Create the multinetwork version of the network.
-    network_mn = WM.make_multinetwork(network);
-    result_mn = WM.solve_mn_owf(network_mn, WM.LRDWaterModel, optimizer; relax_integrality = true);
+    network_mn = WM.make_multinetwork(network)
+    result_mn = WM.solve_mn_owf(network_mn, WM.LRDWaterModel, optimizer; relax_integrality = true)
 
     ref = WM.build_ref(network_mn)
     nw_ids = sort(collect(keys(ref[:it][WM.wm_it_sym][:nw])))
@@ -210,7 +214,7 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
                 elseif num_iterations == 0
                     Delta = delta_star[n][i]
                 else
-                    Delta = Random.shuffle([0.0, delta_star[n][i], 1.0])[1]
+                    Delta = Random.shuffle([0.0, delta_star[n][i], 1.0])[2]
                 end
 
                 cost_1 += (Delta - z[n][i])^2

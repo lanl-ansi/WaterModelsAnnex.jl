@@ -36,6 +36,10 @@ include("prob/owfh.jl")
 include("core/export.jl")
 
 include("alg/simulate.jl")
+include("alg/owf_lazy_cut_callback.jl")
+include("alg/owf_user_cut_callback.jl")
+include("alg/owf_heuristic_callback.jl")
+
 include("alg/solve_owf.jl")
 
 include("util/create_schedules.jl")

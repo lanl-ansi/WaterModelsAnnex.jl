@@ -225,8 +225,8 @@ function constraint_strong_duality(wm::AbstractCDModel)
             push!(f_5, JuMP.@NLexpression(wm.model, c[1] / 3.0 * qp_pump[a]^3 +
                 0.5 * c[2] * qp_pump[a]^2 + c[3] * qp_pump[a]))
 
-            push!(f_6, JuMP.@NLexpression(wm.model, z_pump[a] * (
-                (-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
+            push!(f_6, JuMP.@NLexpression(wm.model,
+                ((-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
                 c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
                 c[1] * g_pump[a] + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *
                 (-sqrt(-4.0 *c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
