@@ -385,7 +385,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
     end
 
     # Constraints on tank volumes.
-    for n_2 in network_ids[2:2]
+    for n_2 in network_ids[2:end]
         # Constrain tank volumes after the initial time step.
         for (i, tank) in WM.ref(wm, :tank; nw = n_2)
             WM.constraint_tank_volume(wm, i, n_1, n_2)
