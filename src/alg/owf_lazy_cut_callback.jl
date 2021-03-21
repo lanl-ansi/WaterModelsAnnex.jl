@@ -143,7 +143,7 @@ function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, optimizer)
         if !feasible_simulation_result(result_sim) && nw_infeasible !== nothing
             add_feasibility_cut!(wm, cb_data, nw_infeasible)
         elseif feasible_simulation_result(result_sim)
-            add_objective_cut!(wm, cb_data, 0.98 * cost)
+            # add_objective_cut!(wm, cb_data, 0.98 * cost)
         end
     end
 end

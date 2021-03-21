@@ -25,7 +25,6 @@ function simulate!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, optim
 
     # Add control time series information from `result` to `data`.
     _update_control_time_series!(data_tmp, result_tmp)
-    println(data_tmp["time_series"]["pump"])
 
     for n in 1:data_tmp["time_series"]["num_steps"]
         # Load and fix data at the current time step.
@@ -38,8 +37,6 @@ function simulate!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, optim
         result_tmp["primal_status"] = result_n["primal_status"]
         result_tmp["dual_status"] = result_n["dual_status"]
 
-        println(result_n["termination_status"], " ", result_n["objective"], " ", result_n["primal_status"])
-
         # TODO: Use objective-based feasibility test.
         if result_n["objective"] > 1.0e-6 || !(result_n["primal_status"] in [FEASIBLE_POINT, NEARLY_FEASIBLE_POINT])
             result_tmp["primal_status"] = INFEASIBLE_POINT
@@ -49,7 +46,7 @@ function simulate!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, optim
         WM._IM.update_data!(result_tmp["solution"]["nw"][string(n)], result_n["solution"])
 
         # If the problem is not feasible, exit the loop.
-        if !(result_n["primal_status"] in [FEASIBLE_POINT, NEARLY_FEASIBLE_POINT])
+        if !feasible_simulation_result(result_n)
             result_tmp["termination_status"] = result_n["termination_status"]
             result_tmp["primal_status"] = result_n["primal_status"]
             result_tmp["dual_status"] = result_n["dual_status"]
@@ -80,12 +77,13 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
         WM._IM.load_timepoint!(data_tmp, n)
         WM.fix_all_indicators!(data_tmp)
 
-        # Solve the single time period subproblem.
+         # Solve the single time period subproblem.
         result_n = WM.solve_wf(data_tmp, CDWaterModel, optimizer; relax_integrality = true)
         result_mn["termination_status"] = result_n["termination_status"]
         result_mn["primal_status"] = result_n["primal_status"]
         result_mn["dual_status"] = result_n["dual_status"]
         sol_nw = result_mn["solution"]["nw"][string(n)]
+        WM._IM.update_data!(sol_nw, result_n["solution"])
 
         if haskey(sol_nw, "pump")
             for (a, pump) in sol_nw["pump"]
@@ -111,14 +109,12 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
             end
         end
 
-        WM._IM.update_data!(result_mn["solution"]["nw"][string(n)], result_n["solution"])
-
-        if result_n["objective"] > 1.0e-6 || result_n["primal_status"] !== FEASIBLE_POINT
+        if !feasible_simulation_result(result_n)
             result_mn["primal_status"] = INFEASIBLE_POINT
         end
 
         # If the problem is not feasible, exit the loop.
-        if result_mn["primal_status"] !== FEASIBLE_POINT
+        if !feasible_simulation_result(result_mn)
             result_mn["last_nw"] = n
             break # Exits the main simulation loop.
         else
@@ -127,19 +123,19 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
 
         if n < data["time_series"]["num_steps"]
             # Update tank heads for the next time step using the current solution.
-            _update_initial_tank_heads!(data_tmp, result_n)
+            _update_initial_tank_heads!(data_tmp, result_n, n+1)
         end
     end
 
-    if result_mn["primal_status"] === FEASIBLE_POINT
+    if feasible_simulation_result(result_mn)
         # Check if the tank levels are recovered at the end of the period.
+        node_indices = [string(x["node"]) for (i, x) in data["tank"]]
         nw_ids = sort([parse(Int, x) for x in keys(result_mn["solution"]["nw"])])
-        tank_sol_start = result_mn["solution"]["nw"][string(nw_ids[1])]["tank"]
-        tank_sol_end = result_mn["solution"]["nw"][string(nw_ids[end])]["tank"]
+        node_sol_start = result_mn["solution"]["nw"][string(nw_ids[1])]["node"]
+        node_sol_end = result_mn["solution"]["nw"][string(nw_ids[end])]["node"]
 
-        @assert Set(keys(tank_sol_start)) == Set(keys(tank_sol_end))
-        tank_ids = sort(collect(keys(tank_sol_start)))
-        recovered = all(tank_sol_end[i]["V"] >= tank_sol_start[i]["V"] for i in tank_ids)
+        @assert Set(keys(node_sol_start)) == Set(keys(node_sol_end))
+        recovered = all([node_sol_end[i]["h"] >= node_sol_start[i]["h"] for i in node_indices])
 
         if !recovered
             result_mn["last_nw"] = nw_ids[end]
@@ -149,7 +145,7 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
 end
 
 
-function _update_control_time_series!(data::Dict{String, <:Any}, schedule, solution)
+function _update_control_time_series!(data::Dict{String, <:Any}, schedule, result)
     if !haskey(data["time_series"], "pump")
         data["time_series"]["pump"] = Dict{String, Any}()
     end
@@ -167,7 +163,7 @@ function _update_control_time_series!(data::Dict{String, <:Any}, schedule, solut
             data["time_series"][comp_type][comp_id] = Dict{String, Any}()
         end
 
-        statuses = [solution[n][k] for n in sort(collect(keys(schedule)))]
+        statuses = [Int(result[n][k]) for n in sort(collect(keys(schedule)))]
         data["time_series"][comp_type][comp_id]["status"] = Array{Int64, 1}(statuses)
         data["time_series"][comp_type][comp_id]["z_min"] = Array{Int64, 1}(statuses)
         data["time_series"][comp_type][comp_id]["z_max"] = Array{Int64, 1}(statuses)
@@ -234,10 +230,9 @@ function _update_tank_time_series!(data::Dict{String, <:Any}, result_mn::Dict{St
 
         elev = [data["node"][string(tank["node"])]["elevation"] for n in nw_ids]
         head = [sol[string(n)]["node"][string(tank["node"])]["h"] for n in nw_ids]
-        init_levels = head .- elev
 
         # Store the tank's initial level data in the time series.
-        data["time_series"]["tank"][i]["init_level"] = init_levels
+        data["time_series"]["tank"][i]["init_level"] = head .- elev
     end
 end
 
@@ -258,6 +253,26 @@ function _set_median_tank_heads!(data::Dict{String, <:Any})
 end
 
 
+function _set_median_tank_time_series!(data::Dict{String, <:Any})
+    if !haskey(data["time_series"], "tank")
+        # Initialize the tank time series dictionary.
+        data["time_series"]["tank"] = Dict{String, Any}()
+    end
+
+    for (i, tank) in data["tank"]
+        # Initialize the tank time series dictionary.
+        if !haskey(data["time_series"]["tank"], i)
+            data["time_series"]["tank"][i] = Dict{String, Any}()
+        end
+
+        # Store the tank's initial level data in the time series.
+        mid_level = 0.5 * (tank["min_level"] + tank["max_level"])
+        level_array = ones(data["time_series"]["num_steps"], 1) * mid_level
+        data["time_series"]["tank"][i]["init_level"] = level_array
+    end
+end
+
+
 function update_tank_heads!(data::Dict{String, <:Any}, solution::Dict{String, <:Any})
     for (i, tank) in data["tank"]
         volume_change = solution["tank"][i]["q"] * data["time_series"]["time_step"]
@@ -266,10 +281,11 @@ function update_tank_heads!(data::Dict{String, <:Any}, solution::Dict{String, <:
 end
 
 
-function _update_initial_tank_heads!(data::Dict{String, <:Any}, result::Dict{String, <:Any})
+function _update_initial_tank_heads!(data::Dict{String, <:Any}, result::Dict{String, <:Any}, time_index::Int)
     for (i, tank) in data["tank"]
         dV = result["solution"]["tank"][i]["q"] * data["time_series"]["time_step"]
         tank["init_level"] -= dV / (0.25 * pi * tank["diameter"]^2)
+        data["time_series"]["tank"][string(i)]["init_level"][time_index] = tank["init_level"]
     end
 end
 

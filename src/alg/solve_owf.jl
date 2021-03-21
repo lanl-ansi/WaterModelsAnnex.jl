@@ -45,11 +45,19 @@ function compute_pairwise_cuts(network::Dict{String, Any}, obbt_optimizer)
 end
 
 
+function construct_owf_model_relaxed(network::Dict{String, Any}, owf_optimizer; kwargs...)
+    network_mn = WM.make_multinetwork(network)
+    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
+    wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf; ext = ext)
+    WM.JuMP.set_optimizer(wm.model, owf_optimizer)
+    return wm # Return the relaxation-based WaterModels object.
+end
+
+
 function construct_owf_model(network::Dict{String, Any}, owf_optimizer; use_lrdx::Bool = true, kwargs...)
     # Construct the OWF model.
     network_mn = WM.make_multinetwork(network)
     ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
-    wm = WM.instantiate_model(network_mn, WM.LRDWaterModel, WM.build_mn_owf; ext = ext)
 
     if use_lrdx
         wm = WM.instantiate_model(network_mn, LRDXWaterModel, WM.build_mn_owf; ext = ext)
@@ -89,6 +97,9 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Construct the OWF model that will serve as the master problem.
     wm = construct_owf_model(network, owf_optimizer; kwargs...)
 
+    # Construct another version of the OWF problem that will be relaxed.
+    wm_relaxed = construct_owf_model_relaxed(network, owf_optimizer; kwargs...)
+
     if use_pairwise_cuts
         # Add binary-binary and binary-continuous pairwise cuts.
         pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
@@ -96,15 +107,14 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     end
 
     # Solve a relaxation of the master problem to begin.
-    undo_relax = WM.JuMP.relax_integrality(wm.model)
-    result_relaxed = WM.optimize_model!(wm)
-    undo_relax() # Undo the continuous relaxation on the model.
+    result_relaxed = WM.optimize_model!(wm_relaxed; relax_integrality = true)
 
     # TODO: Remove this once Gurobi.jl interface is fixed.
     wm.model.moi_backend.optimizer.model.has_generic_callback = false
 
     # Update the tank level time series to be used in finding an initial solution.
     _update_tank_time_series!(network, result_relaxed)
+    #_set_median_tank_time_series!(network)
 
     # Find an initial feasible solution using a heuristic.
     initial_solution_time = @elapsed result_initial_solution =
@@ -113,8 +123,8 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Warm start the primary WaterModels model.
     _set_initial_solution(wm, result_initial_solution)
 
-    # Add the lazy cut callback.
-    add_owf_lazy_cut_callback!(wm, nlp_optimizer)
+    # # Add the lazy cut callback.
+    # add_owf_lazy_cut_callback!(wm, nlp_optimizer)
 
     # Add the user cut callback.
     add_owf_user_cut_callback!(wm)
@@ -127,8 +137,40 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
 end
 
 
+function _set_solution_pumps(wm::WM.AbstractNCDModel, result::Dict{String,<:Any})
+    for nw in sort(collect(WM.nw_ids(wm)))
+        sol_nw = result["solution"]["nw"][string(nw)]
+
+        for (i, pump) in WM.ref(wm, nw, :pump)
+            sol_pump = sol_nw["pump"][string(i)]
+
+            z_val = Float64(Int(sol_pump["status"]))
+            JuMP.set_start_value(WM.var(wm, nw, :z_pump, i), z_val)
+            JuMP.set_start_value(WM.var(wm, nw, :y_pump, i), z_val > 0.0 ? 1.0 : 0.0)
+
+            q_val = z_val * sol_pump["q"]
+            JuMP.set_start_value(WM.var(wm, nw, :qp_pump, i), q_val * (q_val >= 0.0))
+            JuMP.set_start_value(WM.var(wm, nw, :qn_pump, i), q_val * (q_val < 0.0))
+            JuMP.set_start_value(WM.var(wm, nw, :Ps_pump, i), z_val * sol_pump["Ps"])
+
+            h_i = sol_nw["node"][string(pump["node_fr"])]["h"]
+            h_j = sol_nw["node"][string(pump["node_to"])]["h"]
+            JuMP.set_start_value(WM.var(wm, nw, :g_pump, i), z_val * (h_j - h_i))
+        end
+    end
+end
+
+
 function _set_initial_solution(wm::WM.AbstractWaterModel, result::Dict{String, <:Any})
-    for nw in WM.nw_ids(wm)
+    _set_solution_pumps(wm, result)
+
+    for nw in sort(collect(WM.nw_ids(wm)))
+        for (i, demand) in WM.ref(wm, nw, :dispatchable_demand)
+            qd = WM.var(wm, nw, :q_demand, i)
+            qd_sol = result["solution"]["nw"][string(nw)]["demand"][string(i)]["q"]
+            JuMP.set_start_value(qd, qd_sol)
+        end
+
         for (i, reservoir) in WM.ref(wm, nw, :reservoir)
             qr = WM.var(wm, nw, :q_reservoir, i)
             qr_sol = result["solution"]["nw"][string(nw)]["reservoir"][string(i)]["q"]
@@ -138,17 +180,17 @@ function _set_initial_solution(wm::WM.AbstractWaterModel, result::Dict{String, <
         for (i, tank) in WM.ref(wm, nw, :tank)
             qt = WM.var(wm, nw, :q_tank, i)
             qt_sol = result["solution"]["nw"][string(nw)]["tank"][string(i)]["q"]
+
+            if nw < sort(collect(WM.nw_ids(wm)))[end]
+                V_1 = result["solution"]["nw"][string(nw)]["tank"][string(i)]["V"]
+                V_2 = result["solution"]["nw"][string(nw+1)]["tank"][string(i)]["V"]
+                qt_sol = (V_1 - V_2) / WM.ref(wm, nw, :time_step)
+            else
+                qt_sol = result["solution"]["nw"][string(nw)]["tank"][string(i)]["q"]
+            end
+            
+            qt_sol = result["solution"]["nw"][string(nw)]["tank"][string(i)]["q"]
             JuMP.set_start_value(qt, qt_sol)
-        end
-
-        for (i, pump) in WM.ref(wm, nw, :pump)
-            Ps = WM.var(wm, nw, :Ps_pump, i)
-            Ps_sol = result["solution"]["nw"][string(nw)]["pump"][string(i)]["Ps"]
-            JuMP.set_start_value(Ps, Ps_sol)
-
-            g = WM.var(wm, nw, :g_pump, i)
-            g_sol = result["solution"]["nw"][string(nw)]["pump"][string(i)]["g"]
-            JuMP.set_start_value(g, g_sol)
         end
 
         for comp_type in [:pipe, :des_pipe]
@@ -160,33 +202,37 @@ function _set_initial_solution(wm::WM.AbstractWaterModel, result::Dict{String, <
                 h_i = result["solution"]["nw"][string(nw)]["node"][string(comp["node_fr"])]["h"]
                 h_j = result["solution"]["nw"][string(nw)]["node"][string(comp["node_to"])]["h"]
 
-                dhp_sol, dhn_sol = max(0.0, h_i - h_j), max(0.0, h_j - h_i)
-                JuMP.set_start_value(dhp, dhp_sol)
-                JuMP.set_start_value(dhn, dhn_sol)
+                JuMP.set_start_value(dhp, max(0.0, h_i - h_j))
+                JuMP.set_start_value(dhn, max(0.0, h_j - h_i))
             end
         end
         
         for (i, node) in WM.ref(wm, nw, :node)
-            h = WM.var(wm, nw, :h, i)
             h_sol = result["solution"]["nw"][string(nw)]["node"][string(i)]["h"]
-            JuMP.set_start_value(h, h_sol)
+            JuMP.set_start_value(WM.var(wm, nw, :h, i), h_sol)
         end
 
-        for comp_type in [:pipe, :pump, :regulator, :short_pipe, :valve]
+        for comp_type in [:pipe, :des_pipe, :regulator, :short_pipe, :valve]
             for (i, comp) in WM.ref(wm, nw, comp_type)
                 y = WM.var(wm, nw, Symbol("y_" * string(comp_type)), i)
                 qp = WM.var(wm, nw, Symbol("qp_" * string(comp_type)), i)
                 qn = WM.var(wm, nw, Symbol("qn_" * string(comp_type)), i)
-
                 comp_sol = result["solution"]["nw"][string(nw)][string(comp_type)][string(i)]
-                JuMP.set_start_value(qp, max(0.0, comp_sol["q"]))
-                JuMP.set_start_value(qn, max(0.0, -comp_sol["q"]))
-                y_start = comp_sol["q"] > 1.0e-4 ? 1.0 : 0.0
+
+                if comp_type in [:pump, :regulator, :valve]                    
+                    q_sol = Float64(Int(comp_sol["status"])) * comp_sol["q"]
+                else
+                    q_sol = comp_sol["q"]
+                end
+
+                JuMP.set_start_value(qp, max(0.0, q_sol))
+                JuMP.set_start_value(qn, max(0.0, -q_sol))
+                y_start = q_sol > 1.0e-6 ? 1.0 : 0.0
                 JuMP.set_start_value(y, y_start)
             end
         end
 
-        for comp_type in [:pump, :regulator, :valve]
+        for comp_type in [:regulator, :valve]
             for (i, comp) in WM.ref(wm, nw, comp_type)
                 z = WM.var(wm, nw, Symbol("z_" * string(comp_type)), i)
                 comp_sol = result["solution"]["nw"][string(nw)][string(comp_type)][string(i)]
@@ -200,6 +246,6 @@ end
 
 function compute_initial_solution(network::Dict{String, <:Any}, obbt_optimizer, nlp_optimizer)
     schedules = calc_possible_schedules(network, obbt_optimizer, nlp_optimizer)
-    weights = solve_heuristic_problem(network, schedules, obbt_optimizer)
+    weights = solve_heuristic_problem(network, schedules, nlp_optimizer)
     return solve_heuristic_master(network, schedules, weights, nlp_optimizer, obbt_optimizer)
 end

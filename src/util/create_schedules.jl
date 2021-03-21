@@ -180,7 +180,7 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
     previous_sols = Array{Dict{Int, Any}}([])
     n_min = Array{Int64}([])
 
-    while !feasible && num_iterations <= 100
+    while !feasible && num_iterations <= 1000
         model = JuMP.Model()
         cost_1 = JuMP.@expression(model, 0.0)
         costs_2 = [JuMP.AffExpr(0.0) for i in 1:length(schedules[1][1])]
@@ -214,7 +214,7 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
                 elseif num_iterations == 0
                     Delta = delta_star[n][i]
                 else
-                    Delta = Random.shuffle([0.0, delta_star[n][i], 1.0])[2]
+                    Delta = Random.shuffle([0.0, delta_star[n][i], 1.0])[1]
                 end
 
                 cost_1 += (Delta - z[n][i])^2

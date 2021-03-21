@@ -314,7 +314,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         # Flow conservation at all nodes.
         for (i, node) in WM.ref(wm, :node; nw=n)
             WM.constraint_flow_conservation(wm, i; nw=n)
-            WM.constraint_node_directionality(wm, i; nw=n)
+            # WM.constraint_node_directionality(wm, i; nw=n)
         end
 
         # Constraints on pipe flows, heads, and physics.
@@ -323,8 +323,8 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
             WM.constraint_pipe_head(wm, a; nw=n)
             WM.constraint_pipe_head_loss(wm, a; nw=n)
 
-            constraint_pipe_flow_nonlinear(wm, a; nw=n)
-            constraint_pipe_head_nonlinear(wm, a; nw=n)
+            # constraint_pipe_flow_nonlinear(wm, a; nw=n)
+            # constraint_pipe_head_nonlinear(wm, a; nw=n)
         end
 
         # Constraints on design pipe flows, heads, and physics.
@@ -348,8 +348,8 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
             WM.constraint_on_off_pump_flow(wm, a; nw=n)
             WM.constraint_on_off_pump_power(wm, a; nw=n)
 
-            constraint_on_off_pump_flow_nonlinear(wm, a; nw=n)
-            constraint_on_off_pump_gain_nonlinear(wm, a; nw=n)
+            # constraint_on_off_pump_flow_nonlinear(wm, a; nw=n)
+            # constraint_on_off_pump_gain_nonlinear(wm, a; nw=n)
         end
 
         # Constraints on short pipe flows and heads.
@@ -381,23 +381,42 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
     for (i, tank) in WM.ref(wm, :tank; nw = n_1)
         # Set initial conditions of tanks.
         WM.constraint_tank_volume(wm, i; nw = n_1)
-        constraint_tank_nonlinear(wm, i; nw = n_1)
+        # constraint_tank_nonlinear(wm, i; nw = n_1)
     end
 
     # Constraints on tank volumes.
-    for n_2 in network_ids[2:end]
+    for n_2 in network_ids[2:2]
         # Constrain tank volumes after the initial time step.
         for (i, tank) in WM.ref(wm, :tank; nw = n_2)
             WM.constraint_tank_volume(wm, i, n_1, n_2)
-            constraint_tank_nonlinear(wm, i; nw = n_2)
+            # constraint_tank_nonlinear(wm, i; nw = n_2)
         end
 
         n_1 = n_2 # Update the first network used for integration.
     end
 
-    # Add the strong duality constraint.
-    constraint_strong_duality(wm)
+    # # Add the strong duality constraint.
+    # constraint_strong_duality(wm)
 
     # Add the objective.
     WM.objective_wf(wm)
+end
+
+
+function WM.build_mn_owf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
+    # Build the water flow problem.
+    WM.build_mn_wf(wm)
+
+    # Get all network IDs in the multinetwork.
+    network_ids = sort(collect(WM.nw_ids(wm)))
+
+    # Ensure tanks recover their initial volume.
+    n_1, n_f = network_ids[1], network_ids[end]
+
+    for i in WM.ids(wm, n_f, :tank)
+        WM.constraint_tank_volume_recovery(wm, i, n_1, n_f)
+    end
+
+    # Add the optimal water flow objective.
+    WM.objective_owf(wm)
 end
