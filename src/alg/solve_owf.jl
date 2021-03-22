@@ -123,8 +123,8 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Warm start the primary WaterModels model.
     _set_initial_solution(wm, result_initial_solution)
 
-    # # Add the lazy cut callback.
-    # add_owf_lazy_cut_callback!(wm, nlp_optimizer)
+    # Add the lazy cut callback.
+    add_owf_lazy_cut_callback!(wm, network, nlp_optimizer)
 
     # Add the user cut callback.
     add_owf_user_cut_callback!(wm)
