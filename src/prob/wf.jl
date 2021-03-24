@@ -323,8 +323,8 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
             WM.constraint_pipe_head(wm, a; nw=n)
             WM.constraint_pipe_head_loss(wm, a; nw=n)
 
-            # constraint_pipe_flow_nonlinear(wm, a; nw=n)
-            # constraint_pipe_head_nonlinear(wm, a; nw=n)
+            constraint_pipe_flow_nonlinear(wm, a; nw=n)
+            constraint_pipe_head_nonlinear(wm, a; nw=n)
         end
 
         # Constraints on design pipe flows, heads, and physics.
@@ -348,8 +348,8 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
             WM.constraint_on_off_pump_flow(wm, a; nw=n)
             WM.constraint_on_off_pump_power(wm, a; nw=n)
 
-            # constraint_on_off_pump_flow_nonlinear(wm, a; nw=n)
-            # constraint_on_off_pump_gain_nonlinear(wm, a; nw=n)
+            constraint_on_off_pump_flow_nonlinear(wm, a; nw=n)
+            constraint_on_off_pump_gain_nonlinear(wm, a; nw=n)
         end
 
         # Constraints on short pipe flows and heads.
@@ -381,7 +381,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
     for (i, tank) in WM.ref(wm, :tank; nw = n_1)
         # Set initial conditions of tanks.
         WM.constraint_tank_volume(wm, i; nw = n_1)
-        # constraint_tank_nonlinear(wm, i; nw = n_1)
+        constraint_tank_nonlinear(wm, i; nw = n_1)
     end
 
     # Constraints on tank volumes.
@@ -389,14 +389,14 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         # Constrain tank volumes after the initial time step.
         for (i, tank) in WM.ref(wm, :tank; nw = n_2)
             WM.constraint_tank_volume(wm, i, n_1, n_2)
-            # constraint_tank_nonlinear(wm, i; nw = n_2)
+            constraint_tank_nonlinear(wm, i; nw = n_2)
         end
 
         n_1 = n_2 # Update the first network used for integration.
     end
 
-    # # Add the strong duality constraint.
-    # constraint_strong_duality(wm)
+    # Add the strong duality constraint.
+    constraint_strong_duality(wm)
 
     # Add the objective.
     WM.objective_wf(wm)

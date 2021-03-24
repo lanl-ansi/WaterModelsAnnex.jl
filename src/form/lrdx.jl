@@ -39,18 +39,40 @@ end
 
 
 function _calc_pump_gain_integrated_oa(g::JuMP.VariableRef, z::Union{JuMP.VariableRef, JuMP.GenericAffExpr}, g_hat::Float64, c::Array{Float64, 1})
-    f = (max(0.0, (4.0 * c[1] * (g_hat - c[3]) + c[2]^2))^(1.5) + c[2] *
-        (6.0 * c[1] * (g_hat - c[3]) + c[2]^2)) / (12.0 * c[1]^2)
-    df = (sqrt(max(0.0, 4.0 * c[1] * (g_hat - c[3]) + c[2]^2)) + c[2]) / (2.0 * c[1])
+    f = ((-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_hat + c[2]^2) -
+        c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
+        c[1] * g_hat + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *
+        (-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_hat + c[2]^2) -
+        c[2])) / (2.0 * c[1]) - (g_hat * (-sqrt(-4.0 * c[1] * c[3] +
+        4.0 * c[1] * g_hat + c[2]^2) - c[2])) / (2.0 * c[1]))
+
+    df = -(-sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2) - c[2])^2 /
+        (4.0 * c[1] * sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2)) - 
+        (c[2] * (-sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2) - c[2])) /
+        (2.0 * c[1]*sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2)) -
+        (-sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2) - c[2]) /
+        (2.0 * c[1]) + g_hat / sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2) -
+        c[3] / sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2)
+
     return f * z + df * (g - g_hat * z)
 end
 
 
 function _calc_pump_gain_integrated_bound(g::JuMP.VariableRef, z::JuMP.VariableRef, g_lb::Float64, g_ub::Float64, c::Array{Float64, 1})
-    f_lb = (max(0.0, (4.0 * c[1] * (g_lb - c[3]) + c[2]^2))^(1.5) + c[2] *
-        (6.0 * c[1] * (g_lb - c[3]) + c[2]^2)) / (12.0 * c[1]^2)
-    f_ub = (max(0.0, (4.0 * c[1] * (g_ub - c[3]) + c[2]^2))^(1.5) + c[2] *
-        (6.0 * c[1] * (g_ub - c[3]) + c[2]^2)) / (12.0 * c[1]^2)
+    f_lb = ((-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_lb + c[2]^2) -
+        c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
+        c[1] * g_lb + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *
+        (-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_lb + c[2]^2) -
+        c[2])) / (2.0 * c[1]) - (g_lb * (-sqrt(-4.0 * c[1] * c[3] +
+        4.0 * c[1] * g_lb + c[2]^2) - c[2])) / (2.0 * c[1]))
+
+    f_ub = ((-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_ub + c[2]^2) -
+        c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
+        c[1] * g_ub + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *
+        (-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_ub + c[2]^2) -
+        c[2])) / (2.0 * c[1]) - (g_ub * (-sqrt(-4.0 * c[1] * c[3] +
+        4.0 * c[1] * g_ub + c[2]^2) - c[2])) / (2.0 * c[1]))
+
     return f_lb * z + (f_ub - f_lb) / (g_ub - g_lb) * (g - g_lb * z)
 end
 
@@ -266,18 +288,18 @@ function constraint_on_off_pump_gain_nonlinear(
     # Loop over breakpoints strictly between the lower and upper variable bounds.
     for pt in range(g_lb, stop = g_ub, length = num_breakpoints)
         # Add a linear outer approximation of the convex relaxation at `pt`.
-        rhs = _calc_pump_gain_integrated_oa(g, z, pt, coeffs)
+        lhs = _calc_pump_gain_integrated_oa(g, z, pt, coeffs)
 
         # Add outer-approximation of the integrated head loss constraint.
-        c = JuMP.@constraint(wm.model, g_nl <= rhs)
+        c = JuMP.@constraint(wm.model, lhs <= g_nl)
 
         # Append the :pump_head_loss_integrated constraint array.
         append!(WM.con(wm, n, :on_off_pump_gain_nonlinear)[a], [c])
     end
 
     if g_lb < g_ub
-        lhs = _calc_pump_gain_integrated_bound(g, z, g_lb, g_ub, coeffs)
-        c = JuMP.@constraint(wm.model, -lhs <= g_nl) # TODO: Why negate lhs?
+        rhs = _calc_pump_gain_integrated_bound(g, z, g_lb, g_ub, coeffs)
+        c = JuMP.@constraint(wm.model, g_nl <= rhs)
         append!(WM.con(wm, n, :on_off_pump_gain_nonlinear)[a], [c])
     end
 end

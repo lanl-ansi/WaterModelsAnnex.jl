@@ -153,9 +153,29 @@ function _set_solution_pumps(wm::WM.AbstractNCDModel, result::Dict{String,<:Any}
             JuMP.set_start_value(WM.var(wm, nw, :qn_pump, i), q_val * (q_val < 0.0))
             JuMP.set_start_value(WM.var(wm, nw, :Ps_pump, i), z_val * sol_pump["Ps"])
 
+            c =  WM._calc_head_curve_coefficients(pump)
+            qp_nl = (1.0 / 3.0) * c[1] * q_val^3 + 0.5 * c[2] * q_val^2 + c[3] * q_val
+            JuMP.set_start_value(WM.var(wm, nw, :qp_nl_pump, i), qp_nl)
+
             h_i = sol_nw["node"][string(pump["node_fr"])]["h"]
             h_j = sol_nw["node"][string(pump["node_to"])]["h"]
-            JuMP.set_start_value(WM.var(wm, nw, :g_pump, i), z_val * (h_j - h_i))
+
+            g_sol = z_val * sol_pump["g"]
+            JuMP.set_start_value(WM.var(wm, nw, :g_pump, i), g_sol)
+
+            g_nl_sol = (((-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_sol + c[2]^2) -
+                c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
+                c[1] * g_sol + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *
+                (-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_sol + c[2]^2) -
+                c[2])) / (2.0 * c[1]) - (g_sol * (-sqrt(-4.0 * c[1] * c[3] +
+                4.0 * c[1] * g_sol + c[2]^2) - c[2])) / (2.0 * c[1]))) * z_val
+
+            if i == 1 && nw == 1
+                println("start", " ", g_nl_sol)
+            end
+
+            g_nl = WM.var(wm, nw, :g_nl_pump, i)
+            JuMP.set_start_value(g_nl, g_nl_sol)
         end
     end
 end
@@ -180,17 +200,11 @@ function _set_initial_solution(wm::WM.AbstractWaterModel, result::Dict{String, <
         for (i, tank) in WM.ref(wm, nw, :tank)
             qt = WM.var(wm, nw, :q_tank, i)
             qt_sol = result["solution"]["nw"][string(nw)]["tank"][string(i)]["q"]
-
-            if nw < sort(collect(WM.nw_ids(wm)))[end]
-                V_1 = result["solution"]["nw"][string(nw)]["tank"][string(i)]["V"]
-                V_2 = result["solution"]["nw"][string(nw+1)]["tank"][string(i)]["V"]
-                qt_sol = (V_1 - V_2) / WM.ref(wm, nw, :time_step)
-            else
-                qt_sol = result["solution"]["nw"][string(nw)]["tank"][string(i)]["q"]
-            end
-            
-            qt_sol = result["solution"]["nw"][string(nw)]["tank"][string(i)]["q"]
             JuMP.set_start_value(qt, qt_sol)
+
+            qh_nl_tank = WM.var(wm, nw, :qh_nl_tank, i)
+            h_sol = result["solution"]["nw"][string(nw)]["node"][string(tank["node"])]["h"]
+            qh_nl_sol = JuMP.set_start_value(qh_nl_tank, qt_sol * h_sol)
         end
 
         for comp_type in [:pipe, :des_pipe]
@@ -210,6 +224,31 @@ function _set_initial_solution(wm::WM.AbstractWaterModel, result::Dict{String, <
         for (i, node) in WM.ref(wm, nw, :node)
             h_sol = result["solution"]["nw"][string(nw)]["node"][string(i)]["h"]
             JuMP.set_start_value(WM.var(wm, nw, :h, i), h_sol)
+        end
+
+        for (i, pipe) in WM.ref(wm, nw, :pipe)
+            pipe_sol = result["solution"]["nw"][string(nw)]["pipe"][string(i)]
+            qp_sol, qn_sol = max(0.0, pipe_sol["q"]), max(0.0, -pipe_sol["q"])
+            qp_nl, qn_nl = WM.var(wm, nw, :qp_nl_pipe, i), WM.var(wm, nw, :qn_nl_pipe, i)
+            dhp_nl, dhn_nl = WM.var(wm, nw, :dhp_nl_pipe, i), WM.var(wm, nw, :dhn_nl_pipe, i)
+
+            L, exponent = pipe["length"], WM.ref(wm, nw, :alpha)
+            r = WM._calc_pipe_resistance(pipe, wm.data["head_loss"], wm.data["viscosity"], 1.0, 1.0)
+
+            qp_nl_sol = L * r / (1.0 + exponent) * qp_sol^(1.0 + exponent)
+            qn_nl_sol = L * r / (1.0 + exponent) * qn_sol^(1.0 + exponent)
+
+            JuMP.set_start_value(qp_nl, qp_nl_sol)
+            JuMP.set_start_value(qn_nl, qn_nl_sol)
+
+            dhp_sol, dhn_sol = L * r * qp_sol^exponent, L * r * qn_sol^exponent
+
+            L_r, r_r = L^(-1.0 / exponent), r^(-1.0 / exponent)
+            dhp_nl_sol = L_r * r_r * exponent / (1.0 + exponent) * dhp_sol^(1.0 + 1.0 / exponent)
+            dhn_nl_sol = L_r * r_r * exponent / (1.0 + exponent) * dhn_sol^(1.0 + 1.0 / exponent)
+
+            JuMP.set_start_value(dhp_nl, dhp_nl_sol)
+            JuMP.set_start_value(dhn_nl, dhn_nl_sol)
         end
 
         for comp_type in [:pipe, :des_pipe, :regulator, :short_pipe, :valve]
