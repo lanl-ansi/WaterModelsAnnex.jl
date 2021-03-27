@@ -1,9 +1,12 @@
 module WaterModelsAnnex
 
+import BlockDecomposition
+import Coluna
 import JuMP
 import WaterModels
 import LightGraphs
 
+const BD = BlockDecomposition
 const WM = WaterModels
 const JuMP = WM.JuMP
 const MOI = WM.MathOptInterface
@@ -35,6 +38,7 @@ include("prob/owfh.jl")
 
 include("core/export.jl")
 
+include("alg/dantzig_wolfe.jl")
 include("alg/simulate.jl")
 include("alg/owf_lazy_cut_callback.jl")
 include("alg/owf_user_cut_callback.jl")

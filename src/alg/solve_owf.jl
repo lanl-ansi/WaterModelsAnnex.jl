@@ -24,16 +24,40 @@ function solve_owf(network_path::String, modification_path::String, obbt_optimiz
 end
 
 
-function compute_pairwise_cuts(network::Dict{String, Any}, obbt_optimizer)
+function compute_pairwise_cuts(network::Dict{String, Any}, optimizer)
     # Relax the network.
     WM._relax_network!(network)
 
-    # Get pairwise cutting planes from the network-relaxed problem.
+    # Specify extensions to be used in the WaterModels formulation.
     ext = Dict{Symbol, Any}(:pipe_breakpoints => 10, :pump_breakpoints => 10)
-    wm = WM.instantiate_model(network, WM.PWLRDWaterModel, WM.build_owf; ext = ext)
-    WM.JuMP.set_optimizer(wm.model, obbt_optimizer)
-    problem_sets = WM._get_pairwise_problem_sets(wm)
-    cuts = WM._compute_pairwise_cuts!(wm, problem_sets)
+
+    # Construct independent thread-local WaterModels objects.
+    wms = [WM.instantiate_model(network, WM.PWLRDWaterModel,
+        WM.build_owf; ext = ext) for i in 1:Threads.nthreads()]
+
+    # Set the optimizer for the WaterModels objects.
+    map(x -> JuMP.set_optimizer(x.model, optimizer), wms)
+
+    # Get problem sets for generating pairwise cuts.
+    problem_sets = WM._get_pairwise_problem_sets(wms[1])
+
+    # Generate data structures to store thread-local cut results.
+    cuts_array = Array{Array{WM._PairwiseCut, 1}, 1}([])
+
+    for i in 1:Threads.nthreads()
+        # Initialize the per-thread pairwise cut array.
+        push!(cuts_array, Array{WM._PairwiseCut, 1}([]))
+    end
+
+    Threads.@threads for i in 1:length(problem_sets)
+        # Compute pairwise cuts across all problem sets.
+        cuts_local = WM._compute_pairwise_cuts!(wms[Threads.threadid()], [problem_sets[i]])
+        append!(cuts_array[Threads.threadid()], cuts_local)
+        println(Threads.threadid(), " ", i)
+    end
+
+    # Concatenate all cutting plane results.
+    cuts = vcat(cuts_array...)
 
     # Unrelax the network.
     WM._fix_demands!(network)
