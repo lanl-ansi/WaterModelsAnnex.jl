@@ -53,7 +53,6 @@ function compute_pairwise_cuts(network::Dict{String, Any}, optimizer)
         # Compute pairwise cuts across all problem sets.
         cuts_local = WM._compute_pairwise_cuts!(wms[Threads.threadid()], [problem_sets[i]])
         append!(cuts_array[Threads.threadid()], cuts_local)
-        println(Threads.threadid(), " ", i)
     end
 
     # Concatenate all cutting plane results.
@@ -138,7 +137,6 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
 
     # Update the tank level time series to be used in finding an initial solution.
     _update_tank_time_series!(network, result_relaxed)
-    #_set_median_tank_time_series!(network)
 
     # Find an initial feasible solution using a heuristic.
     initial_solution_time = @elapsed result_initial_solution =
