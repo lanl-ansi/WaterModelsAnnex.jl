@@ -79,17 +79,16 @@ function calc_possible_schedules(network::Dict{String, <:Any}, mip_optimizer::An
     # Get all component schedules across all possible time steps.
     schedules = create_all_schedules(wm)
 
-    for n in sort(collect(keys(schedules)))
+    # Create copies of the network to compute everything in parallel.
+    network_tmp = [deepcopy(network) for i in 1:Threads.nthreads()]
+
+    Threads.@threads for n in sort(collect(keys(schedules)))
         # Simulate schedules and filter the solutions.
-        WM._IM.load_timepoint!(network, n) # Load data at time.
-        results = simulate_schedules(network, schedules[n], nlp_optimizer)
+        WM._IM.load_timepoint!(network_tmp[Threads.threadid()], n)
+        results = simulate_schedules(network_tmp[Threads.threadid()], schedules[n], nlp_optimizer)
         ids = filter(k -> results[k][1] === FEASIBLE_POINT, 1:length(results))
         schedules[n] = (schedules[n][1], [(schedules[n][2][i], results[i][2]) for i in ids])
     end
-
-    # Reset the controllable component statuses.
-    WM._IM.load_timepoint!(network, 1)
-    _reset_controllable_component_statuses(network)
 
     # Return schedules with relevant solution properties.
     return schedules
@@ -163,6 +162,7 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
     # Create the multinetwork version of the network.
     network_mn = WM.make_multinetwork(network)
     result_mn = WM.solve_mn_owf(network_mn, WM.LRDWaterModel, optimizer; relax_integrality = true)
+    Random.seed!(0)
 
     ref = WM.build_ref(network_mn)
     nw_ids = sort(collect(keys(ref[:it][WM.wm_it_sym][:nw])))

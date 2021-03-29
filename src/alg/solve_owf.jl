@@ -18,9 +18,16 @@ end
 
 
 function solve_owf(network_path::String, modification_path::String, obbt_optimizer, owf_optimizer, nlp_optimizer; kwargs...)
-    # Tighten the bounds in the network.
-    network = solve_obbt(network_path, modification_path, obbt_optimizer; kwargs...)
-    return solve_owf(network_path, network, obbt_optimizer, owf_optimizer, nlp_optimizer; kwargs...)
+    # Tighten bounds in the network using optimization-based bound tightening.
+    obbt_time = @elapsed network = solve_obbt(network_path,
+        modification_path, obbt_optimizer; kwargs...)
+
+    # Print the amount of time spent to perform the above.
+    WM.Memento.info(LOGGER, "OBBT completed in $(obbt_time) seconds.")
+
+    # Solve the OWF problem using the network from above.
+    return solve_owf(network_path, network, obbt_optimizer,
+        owf_optimizer, nlp_optimizer; kwargs...)
 end
 
 
@@ -29,7 +36,7 @@ function compute_pairwise_cuts(network::Dict{String, Any}, optimizer)
     WM._relax_network!(network)
 
     # Specify extensions to be used in the WaterModels formulation.
-    ext = Dict{Symbol, Any}(:pipe_breakpoints => 10, :pump_breakpoints => 10)
+    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
 
     # Construct independent thread-local WaterModels objects.
     wms = [WM.instantiate_model(network, WM.PWLRDWaterModel,
@@ -121,12 +128,13 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     wm = construct_owf_model(network, owf_optimizer; kwargs...)
 
     # Construct another version of the OWF problem that will be relaxed.
-    wm_relaxed = construct_owf_model_relaxed(network, owf_optimizer; kwargs...)
+    wm_relaxed = construct_owf_model_relaxed(network, obbt_optimizer; kwargs...)
 
     if use_pairwise_cuts
         # Add binary-binary and binary-continuous pairwise cuts.
-        pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
+        cut_time = @elapsed pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
         add_pairwise_cuts(wm, pairwise_cuts)
+        WM.Memento.info(LOGGER, "Cut preprocessing completed in $(cut_time) seconds.")
     end
 
     # Solve a relaxation of the master problem to begin.
@@ -139,8 +147,11 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     _update_tank_time_series!(network, result_relaxed)
 
     # Find an initial feasible solution using a heuristic.
-    initial_solution_time = @elapsed result_initial_solution =
+    heuristic_time = @elapsed result_initial_solution =
         compute_initial_solution(network, obbt_optimizer, nlp_optimizer)
+
+    # Report the amount of time taken to execute the heuristic.
+    WM.Memento.info(LOGGER, "Heuristic completed in $(heuristic_time) seconds.")
 
     # Warm start the primary WaterModels model.
     _set_initial_solution(wm, result_initial_solution)
