@@ -72,7 +72,7 @@ end
 
 function simulate_from_data(data::Dict{String, <:Any}, optimizer)
     result = Dict{String, Any}("primal_status" => WM._MOI.INFEASIBLE_POINT)
-    cost, first_infeasible_nw = 0.0, nothing
+    cost, first_infeasible_nw, recovered = 0.0, nothing, true
 
     for n in 1:data["time_series"]["num_steps"]
         # Load and fix data at the current time step.
@@ -95,11 +95,12 @@ function simulate_from_data(data::Dict{String, <:Any}, optimizer)
         if !tank_recovery_satisfied(data, result)
             first_infeasible_nw = data["time_series"]["num_steps"]
             result["primal_status"] = WM._MOI.INFEASIBLE_POINT
+            recovered = false
         end
     end
     
     # Return the result.
-    return result, first_infeasible_nw, cost
+    return result, first_infeasible_nw, cost, recovered
 end
 
 
@@ -116,6 +117,18 @@ function _get_indicator_variables(wm::WM.AbstractWaterModel)
         for nw_id in WM.nw_ids(wm)
             append!(vars, vcat(WM.var(wm, nw_id, var_sym)...))
         end
+    end
+
+    return vars
+end
+
+
+function _get_pump_indicator_variables_to_nw(wm::WM.AbstractWaterModel, nw_last::Int)
+    vars = Array{WM.JuMP.VariableRef, 1}()
+    network_ids = sort(collect(WM.nw_ids(wm)))[1:nw_last]
+
+    for nw_id in network_ids
+        append!(vars, vcat(WM.var(wm, nw_id, :z_pump)...))
     end
 
     return vars
@@ -154,6 +167,17 @@ function add_feasibility_cut!(wm::WM.AbstractWaterModel, cb_data, nw_last::Int)
 end
 
 
+function add_recovery_feasibility_cut!(wm::WM.AbstractWaterModel, cb_data)    
+    # Collect the current integer solution into "zero" and "one" buckets.
+    vars = _get_pump_indicator_variables_to_nw(wm, length(WM.nw_ids(wm)) - 1)
+    zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
+
+    # If the solution is not feasible (according to a comparison with WNTR), add a no-good cut.
+    con = WM.JuMP.@build_constraint(sum(zero_vars) >= 1)
+    WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
+end
+
+
 function add_objective_cut!(wm::WM.AbstractWaterModel, cb_data, objective_value::Float64)
     # Collect the current integer solution into "zero" and "one" buckets.
     vars = _get_indicator_variables(wm) # All relevant component status variables.
@@ -173,12 +197,15 @@ end
 
 function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, optimizer)
     return function callback_function(cb_data)
-        result_sim, nw_infeasible, cost = simulate_callback_solution(wm, cb_data, network, optimizer)
-        
-        if !feasible_simulation_result(result_sim) && nw_infeasible !== nothing
+        sim_time = @elapsed result_sim, nw_infeasible, cost, recovered =
+            simulate_callback_solution(wm, cb_data, network, optimizer)
+
+        if !feasible_simulation_result(result_sim) && !recovered
+            add_recovery_feasibility_cut!(wm, cb_data)
+        elseif !feasible_simulation_result(result_sim) && nw_infeasible !== nothing
             add_feasibility_cut!(wm, cb_data, nw_infeasible)
         elseif feasible_simulation_result(result_sim)
-            # add_objective_cut!(wm, cb_data, 0.98 * cost)
+            add_objective_cut!(wm, cb_data, cost)
         end
     end
 end

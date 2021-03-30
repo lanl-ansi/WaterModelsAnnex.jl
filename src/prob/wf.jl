@@ -369,6 +369,9 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
             WM.constraint_on_off_valve_head(wm, a; nw=n)
             WM.constraint_on_off_valve_flow(wm, a; nw=n)
         end
+
+        # Add the strong duality constraint.
+        constraint_strong_duality(wm; nw=n)
     end
 
     # Get all network IDs in the multinetwork.
@@ -394,9 +397,6 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
 
         n_1 = n_2 # Update the first network used for integration.
     end
-
-    # Add the strong duality constraint.
-    constraint_strong_duality(wm)
 
     # Add the objective.
     WM.objective_wf(wm)

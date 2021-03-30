@@ -322,7 +322,7 @@ end
 
 
 ""
-function constraint_strong_duality(wm::AbstractLRDXModel)
+function constraint_strong_duality(wm::AbstractLRDXModel; nw::Int=WM.nw_id_default)
     base_length = get(wm.data, "base_length", 1.0)
     base_time = get(wm.data, "base_time", 1.0)
     alpha = WM._get_alpha_min_1(wm) + 1.0
@@ -330,40 +330,38 @@ function constraint_strong_duality(wm::AbstractLRDXModel)
     pipe_type = wm.ref[:it][WM.wm_it_sym][:head_loss]
     viscosity = wm.ref[:it][WM.wm_it_sym][:viscosity]
 
-    qp_pipe_nl = sum(sum(WM.var(wm, nw, :qp_nl_pipe)) for nw in WM.nw_ids(wm))
-    qn_pipe_nl = sum(sum(WM.var(wm, nw, :qn_nl_pipe)) for nw in WM.nw_ids(wm))
-    dhp_pipe_nl = sum(sum(WM.var(wm, nw, :dhp_nl_pipe)) for nw in WM.nw_ids(wm))
-    dhn_pipe_nl = sum(sum(WM.var(wm, nw, :dhn_nl_pipe)) for nw in WM.nw_ids(wm))
+    qp_pipe_nl = sum(WM.var(wm, nw, :qp_nl_pipe))
+    qn_pipe_nl = sum(WM.var(wm, nw, :qn_nl_pipe))
+    dhp_pipe_nl = sum(WM.var(wm, nw, :dhp_nl_pipe))
+    dhn_pipe_nl = sum(WM.var(wm, nw, :dhn_nl_pipe))
     pipe_nl = qp_pipe_nl + qn_pipe_nl + dhp_pipe_nl + dhn_pipe_nl
 
-    qp_pump_nl = sum(sum(WM.var(wm, nw, :qp_nl_pump)) for nw in WM.nw_ids(wm))
-    g_pump_nl = sum(sum(WM.var(wm, nw, :g_nl_pump)) for nw in WM.nw_ids(wm))
-    qh_nl_tank = sum(sum(WM.var(wm, nw, :qh_nl_tank)) for nw in WM.nw_ids(wm))
+    qp_pump_nl = sum(WM.var(wm, nw, :qp_nl_pump))
+    g_pump_nl = sum(WM.var(wm, nw, :g_nl_pump))
+    qh_nl_tank = sum(WM.var(wm, nw, :qh_nl_tank))
     pump_nl = qp_pump_nl - g_pump_nl
 
     reservoir_sum, demand_sum = JuMP.AffExpr(0.0), JuMP.AffExpr(0.0)
 
-    for (n, network) in WM.nws(wm)
-        for (i, res) in WM.ref(wm, n, :reservoir)
-            head = WM.ref(wm, n, :node, res["node"])["head_nominal"]
+    for (i, res) in WM.ref(wm, nw, :reservoir)
+        head = WM.ref(wm, nw, :node, res["node"])["head_nominal"]
 
-            for comp in [:des_pipe, :pipe, :pump, :regulator, :short_pipe, :valve]
-                qp = WM.var(wm, n, Symbol("qp_" * string(comp)))
-                qn = WM.var(wm, n, Symbol("qn_" * string(comp)))
+        for comp in [:des_pipe, :pipe, :pump, :regulator, :short_pipe, :valve]
+            qp = WM.var(wm, nw, Symbol("qp_" * string(comp)))
+            qn = WM.var(wm, nw, Symbol("qn_" * string(comp)))
 
-                for a in WM.ref(wm, n, Symbol(string(comp) * "_fr"), res["node"])
-                    reservoir_sum += head * (qp[a] - qn[a])
-                end
+            for a in WM.ref(wm, nw, Symbol(string(comp) * "_fr"), res["node"])
+                reservoir_sum += head * (qp[a] - qn[a])
+            end
 
-                for a in WM.ref(wm, n, Symbol(string(comp) * "_to"), res["node"])
-                    reservoir_sum += head * (qn[a] - qp[a])
-                end
+            for a in WM.ref(wm, nw, Symbol(string(comp) * "_to"), res["node"])
+                reservoir_sum += head * (qn[a] - qp[a])
             end
         end
+    end
 
-        for (i, demand) in WM.ref(wm, n, :demand)
-            demand_sum += demand["flow_nominal"] * WM.var(wm, n, :h, demand["node"])
-        end
+    for (i, demand) in WM.ref(wm, nw, :demand)
+        demand_sum += demand["flow_nominal"] * WM.var(wm, nw, :h, demand["node"])
     end
 
     linear_terms = demand_sum - reservoir_sum
