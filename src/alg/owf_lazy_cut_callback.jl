@@ -34,8 +34,14 @@ function set_component_statuses_from_callback_data(wm::WM.AbstractWaterModel, cb
     end
 
     for (i, component) in WM.ref(wm, 1, comp_type)
-        status_dict = Dict{String, Any}("status" => Array{WM.STATUS, 1}([]))
-        network["time_series"][string(comp_type)][string(i)] = status_dict
+        if !haskey(network["time_series"][string(comp_type)], string(i))
+            status_dict = Dict{String, Any}("status" => Array{WM.STATUS, 1}([]))
+            network["time_series"][string(comp_type)][string(i)] = status_dict
+        else
+            ts = network["time_series"][string(comp_type)][string(i)]
+            network["time_series"][string(comp_type)][string(i)] =
+                merge(ts, Dict("status" => Array{WM.STATUS, 1}([])))
+        end
     end
 
     var_symbol = Symbol("z_" * string(comp_type))
@@ -78,7 +84,8 @@ function simulate_from_data(data::Dict{String, <:Any}, optimizer)
         # Load and fix data at the current time step.
         WM._IM.load_timepoint!(data, n)
         WM.fix_all_indicators!(data)
-        result = WM.solve_wf(data, CDWaterModel, optimizer; relax_integrality = true)
+        result = WM.solve_wf(data, CDWaterModel,
+            optimizer; relax_integrality = true)
 
         if !feasible_simulation_result(result)
             first_infeasible_nw = n; cost = 0.0; break;
