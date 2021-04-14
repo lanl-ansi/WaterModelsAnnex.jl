@@ -196,7 +196,7 @@ function _set_solution_pumps(wm::WM.AbstractNCDModel, result::Dict{String,<:Any}
                 c =  WM._calc_head_curve_coefficients(pump)
                 qp_nl = (1.0 / 3.0) * c[1] * q_val^3 + 0.5 * c[2] * q_val^2 + c[3] * q_val
                 JuMP.set_start_value(WM.var(wm, nw, :qp_nl_pump, i), qp_nl)
-    
+
                 g_nl_sol = (((-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_sol + c[2]^2) -
                     c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
                     c[1] * g_sol + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *

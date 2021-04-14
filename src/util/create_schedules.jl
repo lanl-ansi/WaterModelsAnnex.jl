@@ -82,7 +82,7 @@ function calc_possible_schedules(network::Dict{String, <:Any}, mip_optimizer::An
     # Create copies of the network to compute everything in parallel.
     network_tmp = [deepcopy(network) for i in 1:Threads.nthreads()]
 
-    Threads.@threads for n in sort(collect(keys(schedules)))
+    time = @elapsed Threads.@threads for n in sort(collect(keys(schedules)))
         # Simulate schedules and filter the solutions.
         WM._IM.load_timepoint!(network_tmp[Threads.threadid()], n)
         results = simulate_schedules(network_tmp[Threads.threadid()], schedules[n], nlp_optimizer)
