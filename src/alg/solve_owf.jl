@@ -77,7 +77,7 @@ end
 
 function construct_owf_model_relaxed(network::Dict{String, Any}, owf_optimizer; kwargs...)
     network_mn = WM.make_multinetwork(network)
-    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
+    ext = Dict(:pipe_breakpoints => 5, :pump_breakpoints => 5)
     wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf; ext = ext)
     WM.JuMP.set_optimizer(wm.model, owf_optimizer)
     return wm # Return the relaxation-based WaterModels object.
@@ -95,15 +95,15 @@ function construct_owf_model(network::Dict{String, Any}, owf_optimizer; use_lrdx
         wm = WM.instantiate_model(network_mn, WM.LRDWaterModel, WM.build_mn_owf; ext = ext)
     end
 
-    # Constrain an auxiliary objective variable by the objective function.
-    objective_function = WM.JuMP.objective_function(wm.model)
-    objective_var = WM.JuMP.@variable(wm.model, base_name = "obj_aux", lower_bound = 0.0)
-    WM.JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective_var)
-    WM.JuMP.@constraint(wm.model, objective_function <= objective_var)
+    # # Constrain an auxiliary objective variable by the objective function.
+    # objective_function = WM.JuMP.objective_function(wm.model)
+    # objective_var = WM.JuMP.@variable(wm.model, base_name = "obj_aux", lower_bound = 0.0)
+    # WM.JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective_var)
+    # WM.JuMP.@constraint(wm.model, objective_function <= objective_var)
 
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, owf_optimizer)
-    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+    # WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
 
     # Return the WaterModels object.
     return wm
@@ -112,7 +112,7 @@ end
 
 function add_pairwise_cuts(wm::WM.AbstractWaterModel, cuts::Array{WM._PairwiseCut, 1})
     # Add the pairwise cuts obtained from the relaxed problem to the OWF problem.
-    for nw_id in WM.nw_ids(wm)
+    for nw_id in sort(collect(WM.nw_ids(wm)))[1:end-1]
         # Use the same cuts for all subnetworks of the multinetwork.
         map(x -> x.variable_index_1.network_index = nw_id, cuts)
         map(x -> x.variable_index_2.network_index = nw_id, cuts)
@@ -128,16 +128,17 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     wm = construct_owf_model(network, owf_optimizer; kwargs...)
 
     # Construct another version of the OWF problem that will be relaxed.
-    wm_relaxed = construct_owf_model_relaxed(network, obbt_optimizer; kwargs...)
+    wm_relaxed = construct_owf_model_relaxed(network, owf_optimizer; kwargs...)
 
     if use_pairwise_cuts
         # Add binary-binary and binary-continuous pairwise cuts.
         cut_time = @elapsed pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
-        add_pairwise_cuts(wm, pairwise_cuts)
+        add_pairwise_cuts(wm, pairwise_cuts); add_pairwise_cuts(wm_relaxed, pairwise_cuts);
         WM.Memento.info(LOGGER, "Cut preprocessing completed in $(cut_time) seconds.")
     end
 
     # Solve a relaxation of the master problem to begin.
+    # WM._relax_all_direction_variables!(wm_relaxed)
     result_relaxed = WM.optimize_model!(wm_relaxed; relax_integrality = true)
 
     # TODO: Remove this once Gurobi.jl interface is fixed.
@@ -146,15 +147,15 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Update the tank level time series to be used in finding an initial solution.
     _update_tank_time_series!(network, result_relaxed)
 
-    # Find an initial feasible solution using a heuristic.
-    heuristic_time = @elapsed result_initial_solution =
-        compute_initial_solution(network, obbt_optimizer, nlp_optimizer)
+    # # Find an initial feasible solution using a heuristic.
+    # heuristic_time = @elapsed result_initial_solution =
+    #     compute_initial_solution(network, obbt_optimizer, nlp_optimizer)
 
-    # Report the amount of time taken to execute the heuristic.
-    WM.Memento.info(LOGGER, "Heuristic completed in $(heuristic_time) seconds.")
+    # # Report the amount of time taken to execute the heuristic.
+    # WM.Memento.info(LOGGER, "Heuristic completed in $(heuristic_time) seconds.")
 
-    # Warm start the primary WaterModels model.
-    _set_initial_solution(wm, result_initial_solution)
+    # # Warm start the primary WaterModels model.
+    # _set_initial_solution(wm, result_initial_solution)
 
     # Add the lazy cut callback.
     add_owf_lazy_cut_callback!(wm, network, nlp_optimizer)
@@ -163,7 +164,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     add_owf_user_cut_callback!(wm)
 
     # Add the heuristic callback.
-    add_owf_heuristic_callback!(wm)
+    # add_owf_heuristic_callback!(wm)
 
     # Optimize the master WaterModels model.
     return WM.optimize_model!(wm)
@@ -171,7 +172,9 @@ end
 
 
 function _set_solution_pumps(wm::WM.AbstractNCDModel, result::Dict{String,<:Any})
-    for nw in sort(collect(WM.nw_ids(wm)))
+    nw_ids = sort(collect(WM.nw_ids(wm)))
+
+    for nw in nw_ids[1:end-1]
         sol_nw = result["solution"]["nw"][string(nw)]
 
         for (i, pump) in WM.ref(wm, nw, :pump)
@@ -214,8 +217,9 @@ end
 
 function _set_initial_solution(wm::WM.AbstractWaterModel, result::Dict{String, <:Any})
     _set_solution_pumps(wm, result)
+    nw_ids = sort(collect(WM.nw_ids(wm)))
 
-    for nw in sort(collect(WM.nw_ids(wm)))
+    for nw in nw_ids[1:end-1]
         for (i, demand) in WM.ref(wm, nw, :dispatchable_demand)
             qd = WM.var(wm, nw, :q_demand, i)
             qd_sol = result["solution"]["nw"][string(nw)]["demand"][string(i)]["q"]
@@ -314,6 +318,11 @@ function _set_initial_solution(wm::WM.AbstractWaterModel, result::Dict{String, <
                 JuMP.set_start_value(z, z_start)
             end
         end
+    end
+
+    for (i, node) in WM.ref(wm, nw_ids[end], :node)
+        h_sol = result["solution"]["nw"][string(nw_ids[end])]["node"][string(i)]["h"]
+        JuMP.set_start_value(WM.var(wm, nw_ids[end], :h, i), h_sol)
     end
 end
 

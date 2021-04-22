@@ -49,7 +49,7 @@ function _calc_pump_gain_integrated_oa(g::JuMP.VariableRef, z::Union{JuMP.Variab
     df = -(-sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2) - c[2])^2 /
         (4.0 * c[1] * sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2)) - 
         (c[2] * (-sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2) - c[2])) /
-        (2.0 * c[1]*sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2)) -
+        (2.0 * c[1] * sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2)) -
         (-sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2) - c[2]) /
         (2.0 * c[1]) + g_hat / sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2) -
         c[3] / sqrt(4.0 * c[1] * g_hat - 4.0 * c[1] * c[3] + c[2]^2)
@@ -276,7 +276,7 @@ function constraint_on_off_pump_gain_nonlinear(
     node_to::Int, coeffs::Array{Float64, 1}, q_min_forward::Float64)
     # Get the number of breakpoints for the pump.
     num_breakpoints = get(wm.ext, :pump_breakpoints, 1)
-
+ 
     # Get the variable for pump status.
     z = WM.var(wm, n, :z_pump, a)
 

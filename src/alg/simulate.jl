@@ -72,7 +72,7 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
     # Add control time series information from `result` to `data`.
     _update_control_time_series!(data_tmp, schedules, result)
 
-    for n in 1:data["time_series"]["num_steps"]
+    for n in 1:data["time_series"]["num_steps"] - 1
         # Load and fix data at the current time step.
         WM._IM.load_timepoint!(data_tmp, n)
         WM.fix_all_indicators!(data_tmp)
@@ -110,7 +110,7 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
         end
 
         if !feasible_simulation_result(result_n)
-            result_mn["primal_status"] = INFEASIBLE_POINT
+             result_mn["primal_status"] = INFEASIBLE_POINT
         end
 
         # If the problem is not feasible, exit the loop.
@@ -121,10 +121,12 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
             result_mn["last_nw"] = nothing
         end
 
-        if n < data["time_series"]["num_steps"]
-            # Update tank heads for the next time step using the current solution.
-            _update_initial_tank_heads!(data_tmp, result_n, n+1)
-        end
+        # Update tank heads for the next time step using the current solution.
+        _update_initial_tank_heads!(data_tmp, result_n, n+1)
+    end
+
+    if feasible_simulation_result(result_mn)
+        _update_final_tank_heads!(data_tmp, result_mn)
     end
 
     if feasible_simulation_result(result_mn)
@@ -138,7 +140,7 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
         recovered = all([node_sol_end[i]["h"] >= node_sol_start[i]["h"] for i in node_indices])
 
         if !recovered
-            result_mn["last_nw"] = nw_ids[end]
+            result_mn["last_nw"] = nw_ids[end] - 1
             result_mn["primal_status"] = INFEASIBLE_POINT
         end
     end
@@ -286,6 +288,26 @@ function _update_initial_tank_heads!(data::Dict{String, <:Any}, result::Dict{Str
         dV = result["solution"]["tank"][i]["q"] * data["time_series"]["time_step"]
         tank["init_level"] -= dV / (0.25 * pi * tank["diameter"]^2)
         data["time_series"]["tank"][string(i)]["init_level"][time_index] = tank["init_level"]
+    end
+end
+
+
+function _update_final_tank_heads!(data::Dict{String, <:Any}, result::Dict{String, <:Any})
+    nw_1 = sort([parse(Int, x) for x in collect(keys(result["solution"]["nw"]))])[end-1]
+    result_1 = result["solution"]["nw"][string(nw_1)]
+
+    nw_2 = sort([parse(Int, x) for x in collect(keys(result["solution"]["nw"]))])[end]
+    result_2 = result["solution"]["nw"][string(nw_2)]
+
+    for (i, tank) in data["tank"]
+        dV = result_1["tank"][i]["q"] * data["time_series"]["time_step"]
+        #tank["init_level"] -= dV / (0.25 * pi * tank["diameter"]^2)
+        #data["time_series"]["tank"][string(i)]["init_level"][nw_2] = tank["init_level"]
+
+        #result_2["tank"][i]["V"] = result_1["tank"][i]["V"] + dV
+        result_2["node"][string(tank["node"])]["h"] = 
+            result_1["node"][string(tank["node"])]["h"] -
+            dV / (0.25 * pi * tank["diameter"]^2)
     end
 end
 

@@ -46,7 +46,7 @@ function set_component_statuses_from_callback_data(wm::WM.AbstractWaterModel, cb
 
     var_symbol = Symbol("z_" * string(comp_type))
 
-    for nw in sort(collect(WM.nw_ids(wm)))
+    for nw in sort(collect(WM.nw_ids(wm)))[1:end-1]
         for (i, component) in WM.ref(wm, nw, comp_type)
             z_var = WM.var(wm, nw, var_symbol, i)
             z_val = JuMP.callback_value(cb_data, z_var)
@@ -68,7 +68,12 @@ function tank_recovery_satisfied(data::Dict{String, <:Any}, result::Dict{String,
     for (i, tank) in data["tank"]
         node = data["node"][string(tank["node"])]
         head_min = node["elevation"] + tank["init_level"]
-        head_value = result["solution"]["node"][string(node["index"])]["h"]
+
+        head_tm1 = result["solution"]["node"][string(node["index"])]["h"]
+        q_tm1 = result["solution"]["tank"][i]["q"]
+        surface_area = 0.25 * pi * tank["diameter"]^2
+        head_value = head_tm1 - q_tm1 * data["time_step"] / surface_area
+
         head_value < head_min && (return false)
     end
 
@@ -80,7 +85,7 @@ function simulate_from_data(data::Dict{String, <:Any}, optimizer)
     result = Dict{String, Any}("primal_status" => WM._MOI.INFEASIBLE_POINT)
     cost, first_infeasible_nw, recovered = 0.0, nothing, true
 
-    for n in 1:data["time_series"]["num_steps"]
+    for n in 1:data["time_series"]["num_steps"] - 1
         # Load and fix data at the current time step.
         WM._IM.load_timepoint!(data, n)
         WM.fix_all_indicators!(data)
@@ -93,9 +98,7 @@ function simulate_from_data(data::Dict{String, <:Any}, optimizer)
             cost += sum(x["c"] for (i, x) in result["solution"]["pump"])
         end
 
-        if n < data["time_series"]["num_steps"]
-            _update_initial_tank_heads!(data, result, n + 1)
-        end
+        _update_initial_tank_heads!(data, result, n + 1)
     end
 
     if feasible_simulation_result(result)

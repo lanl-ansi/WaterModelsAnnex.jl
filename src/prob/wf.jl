@@ -48,6 +48,10 @@ function WM.build_wf(wm::AbstractCDModel)
         WM.constraint_on_off_pump_power(wm, a)
     end
 
+    for (k, pump_group) in WM.ref(wm, :pump_group)
+        WM.constraint_on_off_pump_group(wm, k)
+    end
+
     # Constraints on short pipe flows and heads.
     for (a, regulator) in WM.ref(wm, :regulator)
         WM.constraint_on_off_regulator_head(wm, a)
@@ -84,7 +88,10 @@ function WM.build_mn_wf(wm::AbstractCDModel)
     # Create head loss functions, if necessary.
     WM._function_head_loss(wm)
 
-    for (n, network) in WM.nws(wm)
+    # Get all network IDs in the multinetwork.
+    network_ids = sort(collect(WM.nw_ids(wm)))
+
+    for n in network_ids[1:end-1]
         # Physical variables.
         WM.variable_flow(wm; nw = n, bounded = true)
         WM.variable_head(wm; nw = n, bounded = true)
@@ -131,6 +138,10 @@ function WM.build_mn_wf(wm::AbstractCDModel)
             WM.constraint_on_off_pump_power(wm, a; nw = n)
         end
 
+        for (k, pump_group) in WM.ref(wm, :pump_group; nw=n)
+            WM.constraint_on_off_pump_group(wm, k; nw=n)
+        end
+
         # Constraints on short pipe flows and heads.
         for (a, regulator) in WM.ref(wm, n, :regulator)
             WM.constraint_on_off_regulator_head(wm, a; nw = n)
@@ -150,8 +161,8 @@ function WM.build_mn_wf(wm::AbstractCDModel)
         end
     end
 
-    # Get all network IDs in the multinetwork.
-    network_ids = sort(collect(WM.nw_ids(wm)))
+    # Initialize head variables for the final time index.
+    WM.variable_head(wm; nw = network_ids[end])
 
     # Start with the first network, representing the initial time step.
     n_1 = network_ids[1]
@@ -249,6 +260,10 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         constraint_on_off_pump_gain_nonlinear(wm, a)
     end
 
+    for (k, pump_group) in WM.ref(wm, :pump_group)
+        WM.constraint_on_off_pump_group(wm, k)
+    end
+
     # Constraints on short pipe flows and heads.
     for (a, regulator) in WM.ref(wm, :regulator)
         WM.constraint_on_off_regulator_head(wm, a)
@@ -286,7 +301,10 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
     # Create head loss functions, if necessary.
     WM._function_head_loss(wm)
 
-    for (n, network) in WM.nws(wm)
+    # Get all network IDs in the multinetwork.
+    network_ids = sort(collect(WM.nw_ids(wm)))
+
+    for n in network_ids[1:end-1]
         # Physical variables.
         WM.variable_head(wm; nw=n)
         WM.variable_flow(wm; nw=n)
@@ -314,7 +332,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         # Flow conservation at all nodes.
         for (i, node) in WM.ref(wm, :node; nw=n)
             WM.constraint_flow_conservation(wm, i; nw=n)
-            # WM.constraint_node_directionality(wm, i; nw=n)
+            WM.constraint_node_directionality(wm, i; nw=n)
         end
 
         # Constraints on pipe flows, heads, and physics.
@@ -352,6 +370,10 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
             constraint_on_off_pump_gain_nonlinear(wm, a; nw=n)
         end
 
+        for (k, pump_group) in WM.ref(wm, :pump_group; nw=n)
+            WM.constraint_on_off_pump_group(wm, k; nw=n)
+        end
+
         # Constraints on short pipe flows and heads.
         for (a, regulator) in WM.ref(wm, :regulator; nw=n)
             WM.constraint_on_off_regulator_head(wm, a; nw=n)
@@ -374,8 +396,8 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         constraint_strong_duality(wm; nw=n)
     end
 
-    # Get all network IDs in the multinetwork.
-    network_ids = sort(collect(WM.nw_ids(wm)))
+    # Initialize head variables for the final time index.
+    WM.variable_head(wm; nw = network_ids[end])
 
     # Start with the first network, representing the initial time step.
     n_1 = network_ids[1]
@@ -392,7 +414,10 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         # Constrain tank volumes after the initial time step.
         for (i, tank) in WM.ref(wm, :tank; nw = n_2)
             WM.constraint_tank_volume(wm, i, n_1, n_2)
-            constraint_tank_nonlinear(wm, i; nw = n_2)
+
+            if n_2 != network_ids[end]
+                constraint_tank_nonlinear(wm, i; nw = n_2)
+            end
         end
 
         n_1 = n_2 # Update the first network used for integration.

@@ -16,7 +16,7 @@ end
 function create_all_schedules(wm::WM.AbstractWaterModel)
     schedules = Dict{Int, Tuple}()
 
-    for n in WM.nw_ids(wm)
+    for n in sort(collect(WM.nw_ids(wm)))[1:end-1]
         # Get all controllable components at time step `n`.
         var_ids = get_controllable_variable_indices(wm, n)
 
@@ -107,17 +107,15 @@ function solve_heuristic_problem(network::Dict{String, <:Any}, schedules, optimi
     # Initialize the tank head variables
     h = Dict{Int, Any}(n => JuMP.@variable(
         model, [i in keys(ref[:it][WM.wm_it_sym][:nw][n][:tank])],
-        base_name = "h[$(n)]") for n in nw_ids)
+        base_name = "h[$(n)]") for n in nw_ids[1:end])
 
     lambda = Dict{Int, Any}(n => JuMP.@variable(
         model, [k in 1:length(schedules[n][2])],
-        lower_bound = 0.0, upper_bound = 1.0, start = 1.0,
-        base_name = "lambda[$(n)]") for n in nw_ids)
+        lower_bound = 0.0, upper_bound = 1.0, start = 0.0,
+        base_name = "lambda[$(n)]") for n in nw_ids[1:end-1])
 
     for n in nw_ids
-        JuMP.@constraint(model, sum(lambda[n]) == 1.0)
         time_step = ref[:it][WM.wm_it_sym][:nw][n][:time_step]
-        cost += sum(lambda[n][k] * schedules[n][2][k][2]["cost"] for k in 1:length(lambda[n]))
 
         for (i, tank) in ref[:it][WM.wm_it_sym][:nw][n][:tank]
             surface_area = 0.25 * pi * tank["diameter"]^2
@@ -130,6 +128,10 @@ function solve_heuristic_problem(network::Dict{String, <:Any}, schedules, optimi
             end
 
             if n < nw_ids[end]
+                @assert length(lambda[n]) > 0
+                
+                cost += sum(lambda[n][k] * schedules[n][2][k][2]["cost"] for k in 1:length(lambda[n]))
+                JuMP.@constraint(model, sum(lambda[n]) == 1.0)
                 dh_sum = JuMP.AffExpr(0.0)
 
                 for k in 1:length(lambda[n])
@@ -154,7 +156,7 @@ function solve_heuristic_problem(network::Dict{String, <:Any}, schedules, optimi
     JuMP.set_optimizer(model, optimizer)
     JuMP.optimize!(model)
 
-    return Dict{Int, Any}(n => JuMP.value.(lambda[n]) for n in nw_ids)
+    return Dict{Int, Any}(n => JuMP.value.(lambda[n]) for n in nw_ids[1:end-1])
 end
 
 
@@ -166,9 +168,9 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
 
     ref = WM.build_ref(network_mn)
     nw_ids = sort(collect(keys(ref[:it][WM.wm_it_sym][:nw])))
-    delta_star = Dict{Int, Array}(n => zeros(length(schedules[n][1])) for n in nw_ids)
+    delta_star = Dict{Int, Array}(n => zeros(length(schedules[n][1])) for n in nw_ids[1:end-1])
 
-    for n in nw_ids
+    for n in nw_ids[1:end-1]
         for (i, var_index) in enumerate(schedules[n][1])
             for (k, schedule) in enumerate(schedules[n][2])
                 delta_star[n][i] += schedule[1][i] * weights[n][k]
@@ -180,20 +182,20 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
     previous_sols = Array{Dict{Int, Any}}([])
     n_min = Array{Int64}([])
 
-    while !feasible && num_iterations <= 1000
+    while !feasible && num_iterations <= 100
         model = JuMP.Model()
         cost_1 = JuMP.@expression(model, 0.0)
         costs_2 = [JuMP.AffExpr(0.0) for i in 1:length(schedules[1][1])]
 
         z = Dict{Int, Any}(n => JuMP.@variable(
             model, [k in 1:length(schedules[n][1])],
-            binary = true) for n in nw_ids)
+            binary = true) for n in nw_ids[1:end-1])
 
         for (k, previous_sol) in enumerate(previous_sols)
             one_vars = Array{JuMP.VariableRef, 1}([])
             zero_vars = Array{JuMP.VariableRef, 1}([])
 
-            for n in nw_ids
+            for n in nw_ids[1:end-1]
                 if n_min[k] !== nothing && n <= n_min[k]
                     one_ids = findall(x -> isapprox(x, 1.0; atol = 1.0e-4), previous_sol[n])
                     zero_ids = findall(x -> isapprox(x, 0.0; atol = 1.0e-4), previous_sol[n])
@@ -206,10 +208,10 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
         end
 
         for (i, var_index) in enumerate(schedules[1][1])
-            for n in nw_ids
-                if isapprox(delta_star[n][i], 0.0; atol = 1.0e-4)
+            for n in nw_ids[1:end-1]
+                if isapprox(delta_star[n][i], 0.0; atol = 1.0e-6)
                     Delta = 0.0
-                elseif isapprox(delta_star[n][i], 1.0; atol = 1.0e-4)
+                elseif isapprox(delta_star[n][i], 1.0; atol = 1.0e-6)
                     Delta = 1.0
                 elseif num_iterations == 0
                     Delta = delta_star[n][i]
@@ -229,7 +231,7 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
         num_iterations += 1
 
         sol = Dict{Int, Any}(n => [round(JuMP.value(z[n][k])) for
-            k in 1:length(schedules[1][1])] for n in nw_ids)
+            k in 1:length(schedules[1][1])] for n in nw_ids[1:end-1])
 
         simulate!(network, schedules, sol, result_mn, nlp_optimizer)
         feasible = result_mn["primal_status"] === FEASIBLE_POINT

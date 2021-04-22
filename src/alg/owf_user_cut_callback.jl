@@ -20,8 +20,8 @@ function get_owf_user_cut_callback(wm::WM.AbstractWaterModel)
     qp_pump_vals = _populate_oa_dict(wm, :pump)
 
     return function callback_function(cb_data)
-        for nw in WM.nw_ids(wm)
-            for (a, pipe) in WM.ref(wm, nw, :pipe)
+        for nw in sort(collect(WM.nw_ids(wm)))[1:end-1]
+             for (a, pipe) in WM.ref(wm, nw, :pipe)
                 y = WM.var(wm, nw, :y_pipe, a)
                 y_sol = WM.JuMP.callback_value(cb_data, y)
                 r = WM._calc_pipe_resistance(pipe, head_loss, viscosity, base_length, base_time)
@@ -118,7 +118,7 @@ function get_owf_user_cut_callback(wm::AbstractLRDXModel)
     g_pump_vals = _populate_oa_dict(wm, :pump)
 
     return function callback_function(cb_data)
-        for nw in WM.nw_ids(wm)
+        for nw in sort(collect(WM.nw_ids(wm)))[1:end-1]
             for (a, pipe) in WM.ref(wm, nw, :pipe)
                 y = WM.var(wm, nw, :y_pipe, a)
                 y_sol = WM.JuMP.callback_value(cb_data, y)
