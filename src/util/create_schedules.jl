@@ -4,7 +4,7 @@ function get_controllable_variable_indices(wm::WM.AbstractWaterModel, n::Int)
     var_ids = Array{WM._VariableIndex, 1}([])
 
     for comp_type in [:pump, :valve, :regulator]
-        comp_ids = collect(WM.ids(wm, n, comp_type))
+        comp_ids = sort(collect(WM.ids(wm, n, comp_type)))
         var_sym = Symbol("z_" * String(comp_type))
         append!(var_ids, [WM._VariableIndex(n, comp_type, var_sym, i) for i in comp_ids])
     end
@@ -41,7 +41,8 @@ function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimize
         end
 
         WM.fix_all_indicators!(data)
-        result = WM.solve_wf(data, CDWaterModel, optimizer; relax_integrality = true)
+        result = WM.solve_wf(data, CDWaterModel,
+            optimizer; relax_integrality = true)
 
         objective_is_small = result["objective"] <= 1.0e-6
         status_feasible = result["primal_status"] === FEASIBLE_POINT
@@ -68,11 +69,14 @@ end
 
 
 function calc_possible_schedules(network::Dict{String, <:Any}, mip_optimizer::Any, nlp_optimizer::Any)
+    network_median = deepcopy(network)
+    _set_median_tank_time_series!(network_median)
+
     # Create the multinetwork version of the network.
-    network_mn = WM.make_multinetwork(network)
+    network_mn = WM.make_multinetwork(network_median)
 
     # Solve a relaxation of the OWF to get an estimate of tank volume time series.
-    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
+    ext = Dict(:pipe_breakpoints => 25, :pump_breakpoints => 25)
     wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf; ext = ext)
     result_mip = WM.optimize_model!(wm; optimizer = nlp_optimizer, relax_integrality = true)
 
@@ -80,7 +84,7 @@ function calc_possible_schedules(network::Dict{String, <:Any}, mip_optimizer::An
     schedules = create_all_schedules(wm)
 
     # Create copies of the network to compute everything in parallel.
-    network_tmp = [deepcopy(network) for i in 1:Threads.nthreads()]
+    network_tmp = [deepcopy(network_median) for i in 1:Threads.nthreads()]
 
     time = @elapsed Threads.@threads for n in sort(collect(keys(schedules)))
         # Simulate schedules and filter the solutions.
@@ -209,9 +213,9 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
 
         for (i, var_index) in enumerate(schedules[1][1])
             for n in nw_ids[1:end-1]
-                if isapprox(delta_star[n][i], 0.0; atol = 1.0e-6)
+                if isapprox(delta_star[n][i], 0.0; atol = 1.0e-4)
                     Delta = 0.0
-                elseif isapprox(delta_star[n][i], 1.0; atol = 1.0e-6)
+                elseif isapprox(delta_star[n][i], 1.0; atol = 1.0e-4)
                     Delta = 1.0
                 elseif num_iterations == 0
                     Delta = delta_star[n][i]
@@ -230,11 +234,19 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
         JuMP.optimize!(model)
         num_iterations += 1
 
+        @assert JuMP.primal_status(model) === FEASIBLE_POINT        
+
         sol = Dict{Int, Any}(n => [round(JuMP.value(z[n][k])) for
             k in 1:length(schedules[1][1])] for n in nw_ids[1:end-1])
 
         simulate!(network, schedules, sol, result_mn, nlp_optimizer)
         feasible = result_mn["primal_status"] === FEASIBLE_POINT
+
+        sol_reduced = Dict{Int, Any}(n => [round(JuMP.value(z[n][k])) for
+            k in 1:length(schedules[1][1])] for n in 1:result_mn["last_nw"])
+
+        println(result_mn["last_nw"])
+        push!(previous_sols, sol_reduced)
 
         if result_mn["last_nw"] !== nothing
             push!(n_min, result_mn["last_nw"])

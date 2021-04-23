@@ -110,7 +110,7 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
         end
 
         if !feasible_simulation_result(result_n)
-             result_mn["primal_status"] = INFEASIBLE_POINT
+            result_mn["primal_status"] = INFEASIBLE_POINT
         end
 
         # If the problem is not feasible, exit the loop.
@@ -140,7 +140,7 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
         recovered = all([node_sol_end[i]["h"] >= node_sol_start[i]["h"] for i in node_indices])
 
         if !recovered
-            result_mn["last_nw"] = nw_ids[end] - 1
+            result_mn["last_nw"] = nw_ids[end-1]
             result_mn["primal_status"] = INFEASIBLE_POINT
         end
     end
