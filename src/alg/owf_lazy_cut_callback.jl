@@ -103,7 +103,7 @@ function simulate_from_data(data::Dict{String, <:Any}, optimizer)
 
     if feasible_simulation_result(result)
         if !tank_recovery_satisfied(data, result)
-            first_infeasible_nw = data["time_series"]["num_steps"]
+            first_infeasible_nw = data["time_series"]["num_steps"] - 1
             result["primal_status"] = WM._MOI.INFEASIBLE_POINT
             recovered = false
         end
@@ -124,7 +124,7 @@ function _get_indicator_variables(wm::WM.AbstractWaterModel)
     vars = Array{WM.JuMP.VariableRef, 1}()
 
     for var_sym in [:z_pump, :z_regulator, :z_valve]
-        for nw_id in WM.nw_ids(wm)
+        for nw_id in sort(collect(WM.nw_ids(wm)))[1:end-1]
             append!(vars, vcat(WM.var(wm, nw_id, var_sym)...))
         end
     end
@@ -215,7 +215,7 @@ function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, optimizer
         elseif !feasible_simulation_result(result_sim) && nw_infeasible !== nothing
             add_feasibility_cut!(wm, cb_data, nw_infeasible)
         elseif feasible_simulation_result(result_sim)
-            # add_objective_cut!(wm, cb_data, cost)
+            add_objective_cut!(wm, cb_data, cost)
         end
     end
 end

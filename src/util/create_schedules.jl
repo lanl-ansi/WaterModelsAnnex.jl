@@ -13,6 +13,15 @@ function get_controllable_variable_indices(wm::WM.AbstractWaterModel, n::Int)
 end
 
 
+function compare_variable_indices(var_1::WM._VariableIndex, var_2::WM._VariableIndex)
+    network_index_match = var_1.network_index == var_2.network_index
+    component_type_match = var_1.component_type == var_2.component_type
+    variable_symbol_match = var_1.variable_symbol == var_2.variable_symbol
+    component_index_match = var_1.component_index == var_2.component_index
+    return all([network_index_match, component_type_match, variable_symbol_match, component_index_match])
+end
+
+
 function create_all_schedules(wm::WM.AbstractWaterModel)
     schedules = Dict{Int, Tuple}()
 
@@ -23,6 +32,14 @@ function create_all_schedules(wm::WM.AbstractWaterModel)
         # Create and store all possible component schedules at time step `n`.
         combinations = collect(Iterators.product([[0, 1] for k in 1:length(var_ids)]...))
         schedules[n] = (var_ids, combinations)
+
+        for (k, pump_group) in WM.ref(wm, n, :pump_group)
+            pump_ids = sort(collect(pump_group["pump_indices"]))
+            var_seq = [WM._VariableIndex(n, :pump, :z_pump, i) for i in pump_ids]
+            var_indices = [findfirst(x -> compare_variable_indices(x, var), schedules[n][1]) for var in var_seq]
+            new = filter(x -> sort(collect(x[var_indices]); rev = true) == collect(x[var_indices]), schedules[n][2])
+            schedules[n] = (var_ids, collect(new))
+        end
     end
 
     return schedules
@@ -44,7 +61,7 @@ function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimize
         result = WM.solve_wf(data, CDWaterModel,
             optimizer; relax_integrality = true)
 
-        objective_is_small = result["objective"] <= 1.0e-6
+        objective_is_small = result["objective"] <= 1.0e-7
         status_feasible = result["primal_status"] === FEASIBLE_POINT
 
         if !(objective_is_small && status_feasible)
@@ -242,14 +259,12 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
         simulate!(network, schedules, sol, result_mn, nlp_optimizer)
         feasible = result_mn["primal_status"] === FEASIBLE_POINT
 
-        sol_reduced = Dict{Int, Any}(n => [round(JuMP.value(z[n][k])) for
-            k in 1:length(schedules[1][1])] for n in 1:result_mn["last_nw"])
-
-        println(result_mn["last_nw"])
-        push!(previous_sols, sol_reduced)
-
         if result_mn["last_nw"] !== nothing
+            sol_reduced = Dict{Int, Any}(n => [round(JuMP.value(z[n][k])) for
+                k in 1:length(schedules[1][1])] for n in 1:result_mn["last_nw"])
+
             push!(n_min, result_mn["last_nw"])
+            push!(previous_sols, sol_reduced)
         elseif feasible
             delete!(result_mn, "last_nw")
         end

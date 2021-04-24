@@ -80,7 +80,7 @@ function WM.build_wf(wm::AbstractCDModel)
     constraint_strong_duality(wm)
 
     # Add the objective.
-    WM.objective_wf(wm)
+    # WM.objective_wf(wm)
 end
 
 

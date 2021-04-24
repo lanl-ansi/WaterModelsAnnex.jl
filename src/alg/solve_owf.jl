@@ -77,7 +77,7 @@ end
 
 function construct_owf_model_relaxed(network::Dict{String, Any}, owf_optimizer; kwargs...)
     network_mn = WM.make_multinetwork(network)
-    ext = Dict(:pipe_breakpoints => 3, :pump_breakpoints => 3)
+    ext = Dict(:pipe_breakpoints => 5, :pump_breakpoints => 5)
     wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf; ext = ext)
     WM.JuMP.set_optimizer(wm.model, owf_optimizer)
     return wm # Return the relaxation-based WaterModels object.
@@ -89,7 +89,7 @@ function construct_owf_model(network::Dict{String, Any}, owf_optimizer; use_lrdx
     network_mn = WM.make_multinetwork(network)
 
     # Specify model options and construct the multinetwork OWF model.
-    ext = Dict(:pipe_breakpoints => 5, :pump_breakpoints => 5)
+    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
     model_type = use_lrdx ? LRDXWaterModel : WM.LRDWaterModel
     wm = WM.instantiate_model(network_mn, model_type, WM.build_mn_owf; ext = ext)
 
@@ -137,15 +137,12 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     end
 
     # Solve a relaxation of the master problem to begin.
-    # WM._relax_all_direction_variables!(wm_relaxed)
-    # WM._relax_last_indicator_variables!(wm_relaxed; last_num_steps = 12)
     result_relaxed = WM.optimize_model!(wm_relaxed; relax_integrality = true)
 
     # TODO: Remove this once Gurobi.jl interface is fixed.
     wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
 
     # Update the tank level time series to be used in finding an initial solution.
-    #_set_median_tank_heads!(network)
     _update_tank_time_series!(network, result_relaxed)
 
     # Find an initial feasible solution using a heuristic.
@@ -158,8 +155,8 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Warm start the primary WaterModels model.
     _set_initial_solution(wm_master, result_initial_solution)
 
-    # # Add the lazy cut callback.
-    # add_owf_lazy_cut_callback!(wm, network, nlp_optimizer)
+    # Add the lazy cut callback.
+    add_owf_lazy_cut_callback!(wm_master, network, nlp_optimizer)
 
     # # Add the user cut callback.
     # add_owf_user_cut_callback!(wm)

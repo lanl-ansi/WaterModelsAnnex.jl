@@ -217,9 +217,11 @@ function constraint_strong_duality(wm::AbstractCDModel)
             push!(f_3, JuMP.@NLexpression(wm.model, L_x_r^(-1.0 / alpha) * head_loss_dh(dhp_des_pipe[a])))
             push!(f_3, JuMP.@NLexpression(wm.model, L_x_r^(-1.0 / alpha) * head_loss_dh(dhn_des_pipe[a])))
         end
-
+        
         for (a, pump) in WM.ref(wm, n, :pump)
-            @assert pump["head_curve_form"] in [WM.PUMP_QUADRATIC, WM.PUMP_BEST_EFFICIENCY_POINT, WM.PUMP_LINEAR_POWER]
+            @assert pump["head_curve_form"] in [WM.PUMP_QUADRATIC,
+                WM.PUMP_BEST_EFFICIENCY_POINT, WM.PUMP_LINEAR_POWER]
+
             c = WM._calc_head_curve_coefficients(pump)
             
             push!(f_5, JuMP.@NLexpression(wm.model, c[1] / 3.0 * qp_pump[a]^3 +
@@ -262,11 +264,11 @@ function constraint_strong_duality(wm::AbstractCDModel)
         end
     end
 
-    JuMP.@NLconstraint(wm.model,
+    JuMP.@NLobjective(wm.model, WM._MOI.MIN_SENSE,
         sum(f_1[k] for k in 1:length(f_1)) -
         sum(f_2[k] for k in 1:length(f_2)) +
         sum(f_3[k] for k in 1:length(f_3)) +
         sum(f_4[k] for k in 1:length(f_4)) -
         sum(f_5[k] for k in 1:length(f_5)) +
-        sum(f_6[k] for k in 1:length(f_6)) <= 0.0)
+        sum(f_6[k] for k in 1:length(f_6)))
 end
