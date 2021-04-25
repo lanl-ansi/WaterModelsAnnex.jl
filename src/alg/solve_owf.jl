@@ -126,7 +126,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     wm_master = construct_owf_model(network, owf_optimizer; kwargs...)
 
     # Construct another version of the OWF problem that will be relaxed.
-    wm_relaxed = construct_owf_model_relaxed(network, owf_optimizer; kwargs...)
+    wm_relaxed = construct_owf_model_relaxed(network, obbt_optimizer; kwargs...)
 
     if use_pairwise_cuts
         # Add binary-binary and binary-continuous pairwise cuts.
@@ -152,14 +152,16 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Report the amount of time taken to execute the heuristic.
     WM.Memento.info(LOGGER, "Heuristic completed in $(heuristic_time) seconds.")
 
-    # Warm start the primary WaterModels model.
-    _set_initial_solution(wm_master, result_initial_solution)
+    if result_initial_solution !== nothing
+        # Warm start the primary WaterModels model.
+        _set_initial_solution(wm_master, result_initial_solution)
+    end
 
     # Add the lazy cut callback.
     add_owf_lazy_cut_callback!(wm_master, network, nlp_optimizer)
 
-    # # Add the user cut callback.
-    # add_owf_user_cut_callback!(wm)
+    # Add the user cut callback.
+    add_owf_user_cut_callback!(wm_master)
 
     # # Add the heuristic callback.
     # # add_owf_heuristic_callback!(wm)
@@ -172,7 +174,12 @@ end
 function compute_initial_solution(network::Dict{String, <:Any}, obbt_optimizer, nlp_optimizer)
     schedules = calc_possible_schedules(network, obbt_optimizer, nlp_optimizer)
     weights = solve_heuristic_problem(network, schedules, obbt_optimizer)
-    return solve_heuristic_master(network, schedules, weights, nlp_optimizer, obbt_optimizer)
+
+    if weights !== nothing
+        return solve_heuristic_master(network, schedules, weights, nlp_optimizer, obbt_optimizer)
+    else
+        return nothing
+    end
 end
 
 

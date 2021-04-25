@@ -61,11 +61,12 @@ function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimize
         result = WM.solve_wf(data, CDWaterModel,
             optimizer; relax_integrality = true)
 
-        objective_is_small = result["objective"] <= 1.0e-7
-        status_feasible = result["primal_status"] === FEASIBLE_POINT
-
-        if !(objective_is_small && status_feasible)
+        if !feasible_simulation_result(result)
             result["primal_status"] = INFEASIBLE_POINT
+            result["objective"] = Inf
+        else
+            result["primal_status"] = FEASIBLE_POINT
+            result["objective"] = 0.0
         end
 
         solution_has_pumps = haskey(result["solution"], "pump")
@@ -177,7 +178,11 @@ function solve_heuristic_problem(network::Dict{String, <:Any}, schedules, optimi
     JuMP.set_optimizer(model, optimizer)
     JuMP.optimize!(model)
 
-    return Dict{Int, Any}(n => JuMP.value.(lambda[n]) for n in nw_ids[1:end-1])
+    if JuMP.primal_status(model) === MOI.FEASIBLE_POINT
+        return Dict{Int, Any}(n => JuMP.value.(lambda[n]) for n in nw_ids[1:end-1])
+    else
+        return nothing
+    end
 end
 
 
@@ -257,7 +262,15 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
             k in 1:length(schedules[1][1])] for n in nw_ids[1:end-1])
 
         simulate!(network, schedules, sol, result_mn, nlp_optimizer)
-        feasible = result_mn["primal_status"] === FEASIBLE_POINT
+        feasible = feasible_simulation_result(result_mn)
+
+        if !feasible
+            result_mn["primal_status"] = INFEASIBLE_POINT
+            result_mn["objective"] = Inf
+        else
+            result_mn["primal_status"] = FEASIBLE_POINT
+            result_mn["objective"] = 0.0
+        end
 
         if result_mn["last_nw"] !== nothing
             sol_reduced = Dict{Int, Any}(n => [round(JuMP.value(z[n][k])) for

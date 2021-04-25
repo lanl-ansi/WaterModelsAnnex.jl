@@ -111,13 +111,21 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
 
         if !feasible_simulation_result(result_n)
             result_mn["primal_status"] = INFEASIBLE_POINT
+            result_mn["objective"] = Inf
+        else
+            result_mn["primal_status"] = FEASIBLE_POINT
+            result_mn["objective"] = 0.0
         end
 
         # If the problem is not feasible, exit the loop.
         if !feasible_simulation_result(result_mn)
+            result_mn["primal_status"] = INFEASIBLE_POINT
+            result_mn["objective"] = Inf
             result_mn["last_nw"] = n
             break # Exits the main simulation loop.
         else
+            result_mn["primal_status"] = FEASIBLE_POINT
+            result_mn["objective"] = 0.0
             result_mn["last_nw"] = nothing
         end
 
@@ -142,6 +150,10 @@ function simulate!(data::Dict{String, <:Any}, schedules, result, result_mn, opti
         if !recovered
             result_mn["last_nw"] = nw_ids[end-1]
             result_mn["primal_status"] = INFEASIBLE_POINT
+            result_mn["objective"] = Inf
+        else
+            result_mn["primal_status"] = FEASIBLE_POINT
+            result_mn["objective"] = 0.0
         end
     end
 end
