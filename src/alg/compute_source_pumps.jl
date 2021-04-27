@@ -15,11 +15,11 @@ function find_directional_components(data::Dict{String, <:Any})
             end
         else
             for (a, comp) in data[component_type]
-                if comp["flow_direction"] == WM.POSITIVE
+                if comp["flow_direction"] == WM.FLOW_DIRECTION_POSITIVE
                     component_id += 1
                     i, j = comp["node_fr"], comp["node_to"]
                     directional_components[component_id] = [i, j]
-                elseif  comp["flow_direction"] == WM.NEGATIVE
+                elseif  comp["flow_direction"] == WM.FLOW_DIRECTION_POSITIVE
                     component_id += 1 # Added by @tasseff. - ?
                     i, j = comp["node_fr"], comp["node_to"]
                     directional_components[component_id] = [j, i]
@@ -96,7 +96,7 @@ function find_paths(
     # Dictionary for tracking remaining possible movements.
     poss = Dict()
 
-    for i in range(1,length=length(graph.fadjlist))
+    for i in range(1, length=length(graph.fadjlist))
         poss[i] = []
 
         for j in graph.fadjlist[i]
@@ -271,8 +271,13 @@ function check_if_source_pump(
     graph::LightGraphs.SimpleGraphs.AbstractSimpleGraph{Int64})
     pump_from_node = node_map[string(first(pump))]
 
-    for (res_id,res) in network["reservoir"]
+    for (res_id, res) in network["reservoir"]
         res_node = node_map[string(res["node"])]
+
+        if res_node == pump_from_node
+            return true
+        end
+
         paths_dict = find_paths(res_node, pump_from_node, graph)
         possible_paths = collect(keys(paths_dict))
 
@@ -295,16 +300,17 @@ source pumps and which ones are not and returns a list of source pumps.
 """
 function find_source_pumps(network::Dict{String, <:Any})
     graph, node_map = create_graph(network)
-    pumps_dict = find_directional_pumps(network);
+    pumps_dict = find_directional_pumps(network)
     directional_components_dict = find_directional_components(network) 
     source_pump_ids = []
 
     for (pump_id, pump) in pumps_dict
         status = check_if_source_pump(
-            pump, node_map, network, pumps_dict, directional_components_dict, graph)
+            pump, node_map, network, pumps_dict,
+            directional_components_dict, graph)
 
         if status == true
-            push!(source_pump_ids,pump_id)
+            push!(source_pump_ids, pump_id)
         end
     end
 

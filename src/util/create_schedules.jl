@@ -152,7 +152,10 @@ function solve_heuristic_problem(network::Dict{String, <:Any}, schedules, optimi
             if n < nw_ids[end]
                 @assert length(lambda[n]) > 0
                 
-                cost += sum(lambda[n][k] * schedules[n][2][k][2]["cost"] for k in 1:length(lambda[n]))
+                cost += sum(lambda[n][k] *
+                    schedules[n][2][k][2]["cost"]
+                    for k in 1:length(lambda[n]))
+
                 JuMP.@constraint(model, sum(lambda[n]) == 1.0)
                 dh_sum = JuMP.AffExpr(0.0)
 
@@ -189,7 +192,8 @@ end
 function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights, nlp_optimizer, optimizer)
     # Create the multinetwork version of the network.
     network_mn = WM.make_multinetwork(network)
-    result_mn = WM.solve_mn_owf(network_mn, WM.LRDWaterModel, optimizer; relax_integrality = true)
+    result_mn = WM.solve_mn_owf(network_mn, WM.LRDWaterModel,
+        optimizer; relax_integrality = true)
     Random.seed!(0)
 
     ref = WM.build_ref(network_mn)
@@ -285,38 +289,3 @@ function solve_heuristic_master(network::Dict{String, <:Any}, schedules, weights
 
     return result_mn
 end
-
-
-# function _update_control_time_series!(data::Dict{String, <:Any}, schedule::Tuple)
-#     if !haskey(data["time_series"], "pump")
-#         data["time_series"]["pump"] = Dict{String, Any}()
-#     end
-
-#     if !haskey(data["time_series"], "valve")
-#         data["time_series"]["valve"] = Dict{String, Any}()
-#     end
-
-#     nw_ids = sort([parse(Int, x) for x in keys(result["solution"]["nw"])])
-
-#     for (i, pump) in data["pump"]
-#         sol = result["solution"]["nw"]
-
-#         if !haskey(data["time_series"]["pump"], i)
-#             data["time_series"]["pump"][i] = Dict{String, Any}()
-#         end
-
-#         statuses = Array{Int64, 1}([Int(round(sol[string(n)]["pump"][i]["status"])) for n in nw_ids])
-#         data["time_series"]["pump"][i]["status"] = Array{Int64, 1}(statuses)
-#     end
-
-#     for (i, valve) in data["valve"]
-#         sol = result["solution"]["nw"]
-
-#         if !haskey(data["time_series"]["valve"], i)
-#             data["time_series"]["valve"][i] = Dict{String, Any}()
-#         end
-
-#         statuses = Array{Int64, 1}([Int(round(sol[string(n)]["valve"][i]["status"])) for n in nw_ids])
-#         data["time_series"]["valve"][i]["status"] = statuses
-#     end
-# end

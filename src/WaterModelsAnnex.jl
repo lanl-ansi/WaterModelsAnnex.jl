@@ -44,8 +44,11 @@ include("alg/owf_lazy_cut_callback.jl")
 include("alg/owf_user_cut_callback.jl")
 include("alg/owf_heuristic_callback.jl")
 
+include("alg/compute_source_pumps.jl")
+include("alg/pump_volume_cuts.jl")
 include("alg/solve_owf.jl")
 
+include("util/graph.jl")
 include("util/create_schedules.jl")
 include("core/export.jl")
 

@@ -77,20 +77,20 @@ end
 
 function construct_owf_model_relaxed(network::Dict{String, Any}, owf_optimizer; kwargs...)
     network_mn = WM.make_multinetwork(network)
-    ext = Dict(:pipe_breakpoints => 5, :pump_breakpoints => 5)
-    wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf; ext = ext)
+    ext = Dict(:pipe_breakpoints => 3, :pump_breakpoints => 3)
+    wm = WM.instantiate_model(network_mn, WM.LRDWaterModel, WM.build_mn_owf; ext = ext)
     WM.JuMP.set_optimizer(wm.model, owf_optimizer)
     return wm # Return the relaxation-based WaterModels object.
 end
 
 
-function construct_owf_model(network::Dict{String, Any}, owf_optimizer; use_lrdx::Bool = true, kwargs...)
+function construct_owf_model(network::Dict{String, Any}, owf_optimizer; use_new::Bool = true, kwargs...)
     # Build the multinetwork data structure.
     network_mn = WM.make_multinetwork(network)
 
     # Specify model options and construct the multinetwork OWF model.
-    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
-    model_type = use_lrdx ? LRDXWaterModel : WM.LRDWaterModel
+    ext = Dict(:pipe_breakpoints => 3, :pump_breakpoints => 3)
+    model_type = use_new ? LRDXWaterModel : WM.LRDWaterModel
     wm = WM.instantiate_model(network_mn, model_type, WM.build_mn_owf; ext = ext)
 
     # Constrain an auxiliary objective variable by the objective function.
@@ -121,18 +121,20 @@ function add_pairwise_cuts(wm::WM.AbstractWaterModel, cuts::Array{WM._PairwiseCu
 end
 
 
-function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer, nlp_optimizer; use_pairwise_cuts::Bool = true, kwargs...)
+function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer, nlp_optimizer; use_new::Bool = true, kwargs...)
     # Construct the OWF model that will serve as the master problem.
-    wm_master = construct_owf_model(network, owf_optimizer; kwargs...)
+    wm_master = construct_owf_model(network, owf_optimizer; use_new = use_new, kwargs...)
 
     # Construct another version of the OWF problem that will be relaxed.
     wm_relaxed = construct_owf_model_relaxed(network, obbt_optimizer; kwargs...)
 
-    if use_pairwise_cuts
+    if use_new
         # Add binary-binary and binary-continuous pairwise cuts.
         cut_time = @elapsed pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
         cut_time += @elapsed add_pairwise_cuts(wm_master, pairwise_cuts)
         cut_time += @elapsed add_pairwise_cuts(wm_relaxed, pairwise_cuts)
+        cut_time += @elapsed add_pump_volume_cuts!(wm_master)
+        cut_time += @elapsed add_pump_volume_cuts!(wm_relaxed)
         WM.Memento.info(LOGGER, "Cut preprocessing completed in $(cut_time) seconds.")
     end
 
@@ -163,8 +165,8 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Add the user cut callback.
     add_owf_user_cut_callback!(wm_master)
 
-    # # Add the heuristic callback.
-    # # add_owf_heuristic_callback!(wm)
+    # Add the heuristic callback.
+    # add_owf_heuristic_callback!(wm)
 
     # Optimize the master WaterModels model.
     return WM.optimize_model!(wm_master)

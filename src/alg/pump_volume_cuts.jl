@@ -1,6 +1,6 @@
 function _collect_remaining_nws(wm::WM.AbstractWaterModel, n::Int)
     # Get all network IDs in the multinetwork.
-    network_ids = sort(collect(WM.nw_ids(wm)))
+    network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
     n_id = findfirst(x -> x == n, network_ids)
     return network_ids[n_id:end]
 end
@@ -12,7 +12,7 @@ end
 
 
 function _sum_remaining_reservoir_flows(wm::WM.AbstractWaterModel, nws::Array{Int64, 1})
-    return sum(sum(WM.var(wm, nw, :q_reservoir, a) for a in WM.ids(wm, :reservoir)) for nw in nws)
+    return sum(sum(WM.var(wm, nw, :q_reservoir, a) for a in WM.ids(wm, nw, :reservoir)) for nw in nws)
 end
 
 
@@ -20,17 +20,22 @@ function _sum_remaining_demands(wm::WM.AbstractWaterModel, nws::Array{Int64, 1})
     expr = WM.JuMP.AffExpr(0.0)
 
     for nw in nws
-        expr += sum(WM.var(wm, nw, :q_demand)) # Sum over variable, dispatchable demands.
-        expr += sum(x["flow_nominal"] for (i, x) in WM.ref(wm, nw, :nondispatchable_demand))
+        if length(WM.ref(wm, nw, :dispatchable_demand)) > 0
+            expr += sum(WM.var(wm, nw, :q_demand, i) for i in WM.ref(wm, nw, :dispatchable_demand))
+        end
+
+        if length(WM.ref(wm, nw, :nondispatchable_demand)) > 0
+            expr += sum(x["flow_nominal"] for (i, x) in WM.ref(wm, nw, :nondispatchable_demand))
+        end
     end
 
     return expr
 end
 
 
-function add_pump_volume_cuts!(wm::AbstractWaterModel)
+function add_pump_volume_cuts!(wm::WM.AbstractWaterModel)
     # Get all network IDs in the multinetwork.
-    network_ids = sort(collect(WM.nw_ids(wm)))
+    network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
 
     # Start with the first network, representing the initial time step.
     n_1, n_f = network_ids[1], network_ids[end]
@@ -42,7 +47,10 @@ function add_pump_volume_cuts!(wm::AbstractWaterModel)
         demand_volume = _sum_remaining_demands(wm, nws_remaining)
         pump_volume = _sum_remaining_pump_flows(wm, nws_remaining, source_pumps)
         reservoir_volume = _sum_remaining_reservoir_flows(wm, nws_remaining)
-        tank_volume = (sum(WM.var(wm, n_1, :V)) - sum(WM.var(wm, n, :V))) * inv(time_step)
+
+        tank_volume = (sum(WM.var(wm, n, :V)) - sum(WM.var(wm, nws_remaining[end] + 1, :V))) / time_step
+        c = WM.JuMP.@constraint(wm.model, demand_volume - tank_volume == pump_volume)
+        tank_volume = (sum(WM.var(wm, n_1, :V)) - sum(WM.var(wm, n, :V))) / time_step
         c = WM.JuMP.@constraint(wm.model, demand_volume + tank_volume <= pump_volume)
     end
 end
