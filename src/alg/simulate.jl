@@ -281,8 +281,15 @@ function _set_median_tank_time_series!(data::Dict{String, <:Any})
 
         # Store the tank's initial level data in the time series.
         mid_level = 0.5 * (tank["min_level"] + tank["max_level"])
-        level_array = ones(data["time_series"]["num_steps"], 1) * mid_level
-        data["time_series"]["tank"][i]["init_level"] = level_array
+
+        for k in 2:length(data["time_series"]["tank"][i]["init_level"])
+            if data["time_series"]["tank"][i]["init_level"][k] < mid_level
+                data["time_series"]["tank"][i]["init_level"][k] = mid_level
+            end
+        end
+
+        # level_array = ones(data["time_series"]["num_steps"], 1) * mid_level
+        # data["time_series"]["tank"][i]["init_level"] = level_array
     end
 end
 

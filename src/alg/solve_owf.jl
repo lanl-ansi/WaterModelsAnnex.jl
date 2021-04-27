@@ -77,7 +77,7 @@ end
 
 function construct_owf_model_relaxed(network::Dict{String, Any}, owf_optimizer; kwargs...)
     network_mn = WM.make_multinetwork(network)
-    ext = Dict(:pipe_breakpoints => 3, :pump_breakpoints => 3)
+    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
     wm = WM.instantiate_model(network_mn, WM.LRDWaterModel, WM.build_mn_owf; ext = ext)
     WM.JuMP.set_optimizer(wm.model, owf_optimizer)
     return wm # Return the relaxation-based WaterModels object.
@@ -126,7 +126,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     wm_master = construct_owf_model(network, owf_optimizer; use_new = use_new, kwargs...)
 
     # Construct another version of the OWF problem that will be relaxed.
-    wm_relaxed = construct_owf_model_relaxed(network, obbt_optimizer; kwargs...)
+    wm_relaxed = construct_owf_model_relaxed(network, owf_optimizer; kwargs...)
 
     if use_new
         # Add binary-binary and binary-continuous pairwise cuts.
@@ -139,6 +139,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     end
 
     # Solve a relaxation of the master problem to begin.
+    #WM.relax_every_other_indicator_variable!(wm_relaxed, 2)
     result_relaxed = WM.optimize_model!(wm_relaxed; relax_integrality = true)
 
     # TODO: Remove this once Gurobi.jl interface is fixed.
@@ -150,7 +151,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Find an initial feasible solution using a heuristic.
     heuristic_time = @elapsed result_initial_solution =
         compute_initial_solution(network, obbt_optimizer, nlp_optimizer)
-
+    
     # Report the amount of time taken to execute the heuristic.
     WM.Memento.info(LOGGER, "Heuristic completed in $(heuristic_time) seconds.")
 
