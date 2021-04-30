@@ -218,23 +218,34 @@ function add_objective_cut!(wm::WM.AbstractWaterModel, cb_data, objective_value:
 end
 
 
-function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, optimizer)
+function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, optimizer, stats)
     return function callback_function(cb_data)
-        sim_time = @elapsed result_sim, nw_infeasible, cost, recovered =
+        stats.time_elapsed += @elapsed result_sim, nw_infeasible, cost, recovered =
             simulate_callback_solution(wm, cb_data, network, optimizer)
 
         if !feasible_simulation_result(result_sim) && !recovered
-            add_recovery_feasibility_cut!(wm, cb_data)
+            stats.time_elapsed += @elapsed add_recovery_feasibility_cut!(wm, cb_data)
         elseif !feasible_simulation_result(result_sim) && nw_infeasible !== nothing
-            add_feasibility_cut!(wm, cb_data, nw_infeasible)
+            stats.time_elapsed += @elapsed add_feasibility_cut!(wm, cb_data, nw_infeasible)
         elseif feasible_simulation_result(result_sim)
             # add_objective_cut!(wm, cb_data, cost)
         end
+
+        # Update the number of times the lazy callback was called.
+        stats.num_calls += 1
     end
 end
 
 
+mutable struct CallbackStats
+    time_elapsed::Float64
+    num_calls::Int64
+end
+
+
 function add_owf_lazy_cut_callback!(wm::WM.AbstractWaterModel, network, optimizer)
-    callback_function = get_owf_lazy_cut_callback(wm, network, optimizer)
+    callback_stats = CallbackStats(0.0, 0)
+    callback_function = get_owf_lazy_cut_callback(wm, network, optimizer, callback_stats)
     WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), callback_function)
+    return callback_stats
 end

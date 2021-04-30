@@ -1,3 +1,34 @@
+function WM.build_wf(wm::AbstractCQModel)
+    # Create head loss functions, if necessary.
+    WM._function_head_loss(wm)
+
+    # Physical variables.
+    WM.variable_flow(wm; bounded = false)
+
+    # Create flow-related variables for node attachments.
+    WM.variable_demand_flow(wm; bounded = false)
+    WM.variable_reservoir_flow(wm; bounded = false)
+    WM.variable_tank_flow(wm; bounded = false)
+
+    # Fixed head parameters.
+    parameter_tank_head(wm)
+    parameter_reservoir_head(wm)
+
+    # Indicator (status) parameters.
+    parameter_pump_indicator(wm)
+    parameter_regulator_indicator(wm)
+    parameter_valve_indicator(wm)
+
+    # Flow conservation at all nodes.
+    for (i, node) in WM.ref(wm, :node)
+        WM.constraint_flow_conservation(wm, i)
+    end
+
+    # Add the strong duality constraint.
+    objective_strong_duality(wm)
+end
+
+
 function WM.build_wf(wm::AbstractCDModel)
     # Create head loss functions, if necessary.
     WM._function_head_loss(wm)
@@ -332,7 +363,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         # Flow conservation at all nodes.
         for (i, node) in WM.ref(wm, :node; nw=n)
             WM.constraint_flow_conservation(wm, i; nw=n)
-            WM.constraint_node_directionality(wm, i; nw=n)
+            # WM.constraint_node_directionality(wm, i; nw=n)
         end
 
         # Constraints on pipe flows, heads, and physics.

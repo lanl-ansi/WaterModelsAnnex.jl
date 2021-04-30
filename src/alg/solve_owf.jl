@@ -1,4 +1,4 @@
-function solve_obbt(network_path::String, modification_path::String, obbt_optimizer; time_limit::Float64 = 3600.0, use_obbt::Bool = true, kwargs...)
+function solve_obbt(network_path::String, modification_path::String, obbt_optimizer; time_limit::Float64 = 3600.0, use_obbt::Bool = false, kwargs...)
     # Read in the original network data.
     network = WM.parse_file(network_path; skip_correct = true)
     modifications = WM.parse_file(modification_path; skip_correct = true)
@@ -124,62 +124,75 @@ end
 function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer, nlp_optimizer; use_new::Bool = true, kwargs...)
     # Construct the OWF model that will serve as the master problem.
     wm_master = construct_owf_model(network, owf_optimizer; use_new = use_new, kwargs...)
+    return calc_heuristic(wm_master, obbt_optimizer, nlp_optimizer);
 
-    # Construct another version of the OWF problem that will be relaxed.
-    wm_relaxed = construct_owf_model_relaxed(network, owf_optimizer; kwargs...)
+    # # Construct another version of the OWF problem that will be relaxed.
+    # wm_relaxed = construct_owf_model_relaxed(network, owf_optimizer; kwargs...)
 
-    if use_new
-        # Add binary-binary and binary-continuous pairwise cuts.
-        cut_time = @elapsed pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
-        cut_time += @elapsed add_pairwise_cuts(wm_master, pairwise_cuts)
-        cut_time += @elapsed add_pairwise_cuts(wm_relaxed, pairwise_cuts)
-        cut_time += @elapsed add_pump_volume_cuts!(wm_master)
-        cut_time += @elapsed add_pump_volume_cuts!(wm_relaxed)
-        WM.Memento.info(LOGGER, "Cut preprocessing completed in $(cut_time) seconds.")
-    end
+    # # if use_new
+    # #     # Add binary-binary and binary-continuous pairwise cuts.
+    # #     cut_time = @elapsed pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
+    # #     cut_time += @elapsed add_pairwise_cuts(wm_master, pairwise_cuts)
+    # #     cut_time += @elapsed add_pairwise_cuts(wm_relaxed, pairwise_cuts)
+    # #     cut_time += @elapsed add_pump_volume_cuts!(wm_master)
+    # #     cut_time += @elapsed add_pump_volume_cuts!(wm_relaxed)
+    # #     WM.Memento.info(LOGGER, "Cut preprocessing completed in $(cut_time) seconds.")
+    # # end
 
-    # Solve a relaxation of the master problem to begin.
-    #WM.relax_every_other_indicator_variable!(wm_relaxed, 2)
-    result_relaxed = WM.optimize_model!(wm_relaxed; relax_integrality = true)
+    # # Solve a relaxation of the master problem to begin.
+    # result_relaxed = WM.optimize_model!(wm_relaxed; relax_integrality = true)
 
-    # TODO: Remove this once Gurobi.jl interface is fixed.
-    wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
+    # # TODO: Remove this once Gurobi.jl interface is fixed.
+    # wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
 
-    # Update the tank level time series to be used in finding an initial solution.
-    _update_tank_time_series!(network, result_relaxed)
+    # # Update the tank level time series to be used in finding an initial solution.
+    # _update_tank_time_series!(network, result_relaxed)
 
-    # Find an initial feasible solution using a heuristic.
-    heuristic_time = @elapsed result_initial_solution =
-        compute_initial_solution(network, obbt_optimizer, nlp_optimizer)
+    # # Find an initial feasible solution using a heuristic.
+    # result_initial_solution = compute_initial_solution(network, obbt_optimizer, nlp_optimizer)
+
+    # return result_initial_solution
     
-    # Report the amount of time taken to execute the heuristic.
-    WM.Memento.info(LOGGER, "Heuristic completed in $(heuristic_time) seconds.")
+    # if result_initial_solution !== nothing
+    #     # Warm start the primary WaterModels model.
+    #     _set_initial_solution(wm_master, result_initial_solution)
+    # end
 
-    if result_initial_solution !== nothing
-        # Warm start the primary WaterModels model.
-        _set_initial_solution(wm_master, result_initial_solution)
-    end
+    # # Add the lazy cut callback.
+    # lazy_cut_stats = add_owf_lazy_cut_callback!(wm_master, network, nlp_optimizer)
 
-    # Add the lazy cut callback.
-    add_owf_lazy_cut_callback!(wm_master, network, nlp_optimizer)
+    # # # Add the user cut callback.
+    # # add_owf_user_cut_callback!(wm_master)
 
-    # Add the user cut callback.
-    add_owf_user_cut_callback!(wm_master)
+    # # Add the heuristic callback.
+    # # add_owf_heuristic_callback!(wm)
 
-    # Add the heuristic callback.
-    # add_owf_heuristic_callback!(wm)
+    # # Optimize the master WaterModels model.
+    # result = WM.optimize_model!(wm_master)
 
-    # Optimize the master WaterModels model.
-    return WM.optimize_model!(wm_master)
+    # return result
+end
+
+
+function calc_heuristic(wm::WM.AbstractWaterModel, mip_optimizer, nlp_optimizer)
+    control_settings = create_all_control_settings(wm)
+    filter_control_settings_pump_group!(control_settings)
+    return control_settings
 end
 
 
 function compute_initial_solution(network::Dict{String, <:Any}, obbt_optimizer, nlp_optimizer)
-    schedules = calc_possible_schedules(network, obbt_optimizer, nlp_optimizer)
-    weights = solve_heuristic_problem(network, schedules, obbt_optimizer)
+    time_pp = @elapsed schedules = calc_possible_schedules(network, obbt_optimizer, nlp_optimizer)
+    return schedules
+    WM.Memento.info(LOGGER, "[HEUR] Preprocessing completed in $(time_pp) seconds.")
+
+    time_lp = @elapsed weights = solve_heuristic_problem(network, schedules, obbt_optimizer)
+    WM.Memento.info(LOGGER, "[HEUR] Linear program solved in $(time_lp) seconds.")
 
     if weights !== nothing
-        return solve_heuristic_master(network, schedules, weights, nlp_optimizer, obbt_optimizer)
+        time_bd = @elapsed result = solve_heuristic_master(network, schedules, weights, nlp_optimizer, obbt_optimizer)
+        WM.Memento.info(LOGGER, "[HEUR] Benders decomposition solved in $(time_bd) seconds.")
+        return result
     else
         return nothing
     end

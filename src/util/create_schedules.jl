@@ -22,28 +22,60 @@ function compare_variable_indices(var_1::WM._VariableIndex, var_2::WM._VariableI
 end
 
 
-function create_all_schedules(wm::WM.AbstractWaterModel)
-    schedules = Dict{Int, Tuple}()
-
-    for n in sort(collect(WM.nw_ids(wm)))[1:end-1]
-        # Get all controllable components at time step `n`.
-        var_ids = get_controllable_variable_indices(wm, n)
-
-        # Create and store all possible component schedules at time step `n`.
-        combinations = collect(Iterators.product([[0, 1] for k in 1:length(var_ids)]...))
-        schedules[n] = (var_ids, combinations)
-
-        for (k, pump_group) in WM.ref(wm, n, :pump_group)
-            pump_ids = sort(collect(pump_group["pump_indices"]))
-            var_seq = [WM._VariableIndex(n, :pump, :z_pump, i) for i in pump_ids]
-            var_indices = [findfirst(x -> compare_variable_indices(x, var), schedules[n][1]) for var in var_seq]
-            new = filter(x -> sort(collect(x[var_indices]); rev = true) == collect(x[var_indices]), schedules[n][2])
-            schedules[n] = (var_ids, collect(new))
-        end
-    end
-
-    return schedules
+mutable struct ControlSetting
+    network_id::Int
+    variables_indices::Array{WM._VariableIndex, 1}
+    values::Array{Float64, 1}
 end
+
+
+function create_control_settings_at_time(wm::WM.AbstractWaterModel, n::Int)
+    # Create variable indices for all controllable components at time `n`.
+    pump_groups = WM.ref(wm, n, :pump_group)
+    z_pump = WM._VariableIndex.(n, :pump, :z_pump, WM.ids(wm, n, :pump))
+    z_regulator = WM._VariableIndex.(n, :regulator, :z_regulator, WM.ids(wm, n, :regulator))
+    z_valve = WM._VariableIndex.(n, :valve, :z_valve, WM.ids(wm, n, :valve))
+
+    # Generate all possible controllable status combinations at time `n`.
+    var_ids = vcat(z_pump, z_regulator, z_valve)
+    @elapsed combinations = Iterators.product([[0.0, 1.0] for k in 1:length(var_ids)]...)
+    return vcat([ControlSetting(n, var_ids, collect(c)) for c in combinations]...)
+end
+
+
+function create_all_control_settings(wm::WM.AbstractWaterModel)
+    network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
+    return vcat([create_control_settings_at_time(wm, n) for n in network_ids]...)
+end
+
+
+function filter_control_settings_pump_group!(control_settings::Array{ControlSetting, 1})
+    println("hi")
+end
+
+    #return vcat([create_control_settings_at_time(Ref(wm), n) for n in network_ids]...)
+
+    # schedules = Dict{Int, Tuple}()
+
+    # for n in sort(collect(WM.nw_ids(wm)))[1:end-1]
+    #     # Get all controllable components at time step `n`.
+    #     var_ids = get_controllable_variable_indices(wm, n)
+
+    #     # Create and store all possible component schedules at time step `n`.
+    #     combinations = collect(Iterators.product([[0, 1] for k in 1:length(var_ids)]...))
+    #     schedules[n] = (var_ids, combinations)
+
+    #     for (k, pump_group) in WM.ref(wm, n, :pump_group)
+    #         pump_ids = sort(collect(pump_group["pump_indices"]))
+    #         var_seq = [WM._VariableIndex(n, :pump, :z_pump, i) for i in pump_ids]
+    #         var_indices = [findfirst(x -> compare_variable_indices(x, var), schedules[n][1]) for var in var_seq]
+    #         new = filter(x -> sort(collect(x[var_indices]); rev = true) == collect(x[var_indices]), schedules[n][2])
+    #         schedules[n] = (var_ids, collect(new))
+    #     end
+    # end
+
+    # return schedules
+
 
 
 function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimizer::Any)
@@ -86,7 +118,18 @@ function simulate_schedules(data::Dict{String,<:Any}, schedules::Tuple, optimize
 end
 
 
+function _instantiate_cq_model(data::Dict{String, <:Any})
+    return WM.instantiate_model(data, CQWaterModel, WM.build_wf)
+end
+
+
+function calc_control_settings(wm::WM.AbstractWaterModel)
+end
+
+
 function calc_possible_schedules(network::Dict{String, <:Any}, mip_optimizer::Any, nlp_optimizer::Any)
+    control_settings = create_all_control_settings(network)
+
     network_median = deepcopy(network)
     _set_median_tank_time_series!(network_median)
 
@@ -100,20 +143,23 @@ function calc_possible_schedules(network::Dict{String, <:Any}, mip_optimizer::An
 
     # Get all component schedules across all possible time steps.
     schedules = create_all_schedules(wm)
+    return schedules
 
     # Create copies of the network to compute everything in parallel.
     network_tmp = [deepcopy(network_median) for i in 1:Threads.nthreads()]
+    wms = [_instantiate_cq_model(network_tmp[i]) for i in 1:Threads.nthreads()]
+    return wms
 
-    time = @elapsed Threads.@threads for n in sort(collect(keys(schedules)))
-        # Simulate schedules and filter the solutions.
-        WM._IM.load_timepoint!(network_tmp[Threads.threadid()], n)
-        results = simulate_schedules(network_tmp[Threads.threadid()], schedules[n], nlp_optimizer)
-        ids = filter(k -> results[k][1] === FEASIBLE_POINT, 1:length(results))
-        schedules[n] = (schedules[n][1], [(schedules[n][2][i], results[i][2]) for i in ids])
-    end
+    # time = @elapsed Threads.@threads for n in sort(collect(keys(schedules)))
+    #     # Simulate schedules and filter the solutions.
+    #     WM._IM.load_timepoint!(network_tmp[Threads.threadid()], n)
+    #     results = simulate_schedules(network_tmp[Threads.threadid()], schedules[n], nlp_optimizer)
+    #     ids = filter(k -> results[k][1] === FEASIBLE_POINT, 1:length(results))
+    #     schedules[n] = (schedules[n][1], [(schedules[n][2][i], results[i][2]) for i in ids])
+    # end
 
-    # Return schedules with relevant solution properties.
-    return schedules
+    # # Return schedules with relevant solution properties.
+    # return schedules
 end
 
 

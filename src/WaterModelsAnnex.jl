@@ -30,6 +30,7 @@ include("core/function.jl")
 include("core/constraint_template.jl")
 
 include("form/cd.jl")
+include("form/cq.jl")
 include("form/cdx.jl")
 include("form/lrdx.jl")
 
