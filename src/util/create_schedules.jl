@@ -29,17 +29,89 @@ mutable struct ControlSetting
 end
 
 
-function create_control_settings_at_time(wm::WM.AbstractWaterModel, n::Int)
+function create_pump_settings_at_time(wm::WM.AbstractWaterModel, n::Int)
+    control_settings = Array{Array{ControlSetting}}([])
+
     # Create variable indices for all controllable components at time `n`.
-    pump_groups = WM.ref(wm, n, :pump_group)
-    z_pump = WM._VariableIndex.(n, :pump, :z_pump, WM.ids(wm, n, :pump))
-    z_regulator = WM._VariableIndex.(n, :regulator, :z_regulator, WM.ids(wm, n, :regulator))
-    z_valve = WM._VariableIndex.(n, :valve, :z_valve, WM.ids(wm, n, :valve))
+    for (pump_group_id, pump_group) in WM.ref(wm, n, :pump_group)
+        pump_ids = pump_group["pump_indices"]
+        pump_combinations = vcat([zeros(length(pump_ids))], [[j >= i ? 1.0 :
+            0.0 for i = 1:length(pump_ids)] for j = 1:length(pump_ids)])
+        pump_vars = WM._VariableIndex.(n, :pump, :z_pump, pump_ids)
+        push!(control_settings, ControlSetting.(n, Ref(pump_vars), pump_combinations))
+    end
+
+    pump_ids_group = vcat([collect(x["pump_indices"])
+        for (i, x) in WM.ref(wm, n, :pump_group)]...)
+
+    pump_ids = filter(x -> !(x in pump_ids_group), WM.ids(wm, n, :pump))
+
+    # if length(pump_ids) > 0
+    #     z = WM._VariableIndex.(n, :pump, :z_pump, pump_ids)
+    #     #vals = collect(Iterators.product([1.0, 0.0] for k in 1:length(z)))
+    #     vals = vcat(collect(Iterators.product([[1.0, 0.0] for k in 1:length(z)])...))
+    #     push!(control_settings, ControlSetting.(n, Ref(z), vals))
+    # end
+
+    return control_settings
+end
+
+
+function create_regulator_settings_at_time(wm::WM.AbstractWaterModel, n::Int)
+    regulator_ids = WM.ids(wm, n, :regulator)
+    control_settings = Array{Array{ControlSetting}}([])
+
+    if length(regulator_ids) > 0
+        z = WM._VariableIndex.(n, :regulator, :z_regulator, regulator_ids)
+        vals = collect(Iterators.product([1.0, 0.0] for k in 1:length(z)))
+        push!(control_settings, ControlSetting.(n, Ref(z), vals))
+    end
+
+    return control_settings
+end
+
+
+function create_valve_settings_at_time(wm::WM.AbstractWaterModel, n::Int)
+    valve_ids = WM.ids(wm, n, :valve)
+    control_settings = Array{Array{ControlSetting}}([])
+
+    if length(valve_ids) > 0
+        z = WM._VariableIndex.(n, :valve, :z_valve, valve_ids)
+        vals = collect(Iterators.product([1.0, 0.0] for k in 1:length(z)))
+        push!(control_settings, ControlSetting.(n, Ref(z), vals))
+    end
+
+    return control_settings
+end
+
+
+function cartesian_product(settings::Array{Array{ControlSetting}})
+    return collect(Iterators.product(settings...))
+end
+
+
+function create_control_settings_at_time(wm::WM.AbstractWaterModel, n::Int)
+    pump_control_settings = create_pump_settings_at_time(wm, n)
+    # regulator_control_settings = create_regulator_settings_at_time(wm, n)
+    # valve_control_settings = create_valve_settings_at_time(wm, n)
+    # control_settings_partitioned = vcat(pump_control_settings,
+    #     regulator_control_settings, valve_control_settings)
+
+    control_settings = cartesian_product(pump_control_settings)
+    
+
+    
+
+    # z_valve = WM._VariableIndex.(n, :valve, :z_valve, WM.ids(wm, n, :valve))
+    # append!(control_settings, [ControlSetting.(n, [[v] for v in z_valve], Ref([1.0]))])
+    # append!(control_settings, [ControlSetting.(n, [[v] for v in z_valve], Ref([0.0]))])
 
     # Generate all possible controllable status combinations at time `n`.
-    var_ids = vcat(z_pump, z_regulator, z_valve)
-    @elapsed combinations = Iterators.product([[0.0, 1.0] for k in 1:length(var_ids)]...)
-    return vcat([ControlSetting(n, var_ids, collect(c)) for c in combinations]...)
+    # var_ids = vcat(z_pump, z_regulator, z_valve)
+    # combs = Iterators.product([[0.0, 1.0] for k in 1:length(var_ids)]...)
+    # append!(control_settings, [ControlSetting(n, var_ids, collect(c)) for c in combs])
+    return pump_control_settings
+    #return vcat([ControlSetting(n, var_ids, collect(c)) for c in combinations]...)
 end
 
 

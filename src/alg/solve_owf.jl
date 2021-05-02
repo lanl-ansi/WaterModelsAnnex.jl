@@ -124,7 +124,7 @@ end
 function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer, nlp_optimizer; use_new::Bool = true, kwargs...)
     # Construct the OWF model that will serve as the master problem.
     wm_master = construct_owf_model(network, owf_optimizer; use_new = use_new, kwargs...)
-    return calc_heuristic(wm_master, obbt_optimizer, nlp_optimizer);
+    return calc_heuristic(wm_master, obbt_optimizer, nlp_optimizer)
 
     # # Construct another version of the OWF problem that will be relaxed.
     # wm_relaxed = construct_owf_model_relaxed(network, owf_optimizer; kwargs...)
@@ -175,9 +175,7 @@ end
 
 
 function calc_heuristic(wm::WM.AbstractWaterModel, mip_optimizer, nlp_optimizer)
-    control_settings = create_all_control_settings(wm)
-    filter_control_settings_pump_group!(control_settings)
-    return control_settings
+    return create_all_control_settings(wm)
 end
 
 
