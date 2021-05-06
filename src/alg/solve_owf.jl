@@ -1,4 +1,4 @@
-function solve_obbt(network_path::String, modification_path::String, obbt_optimizer; time_limit::Float64 = 3600.0, use_obbt::Bool = false, kwargs...)
+function solve_obbt(network_path::String, modification_path::String, obbt_optimizer; time_limit::Float64 = 3600.0, use_obbt::Bool = true, kwargs...)
     # Read in the original network data.
     network = WM.parse_file(network_path; skip_correct = true)
     modifications = WM.parse_file(modification_path; skip_correct = true)
@@ -90,14 +90,14 @@ function construct_owf_model(network::Dict{String, Any}, owf_optimizer; use_new:
 
     # Specify model options and construct the multinetwork OWF model.
     ext = Dict(:pipe_breakpoints => 3, :pump_breakpoints => 3)
-    model_type = use_new ? LRDXWaterModel : WM.LRDWaterModel
+    model_type = WM.LRDWaterModel #use_new ? LRDXWaterModel : WM.LRDWaterModel
     wm = WM.instantiate_model(network_mn, model_type, WM.build_mn_owf; ext = ext)
 
     # Constrain an auxiliary objective variable by the objective function.
-    objective_function = WM.JuMP.objective_function(wm.model)
-    objective_var = WM.JuMP.@variable(wm.model, base_name = "obj_aux", lower_bound = 0.0)
-    WM.JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective_var)
-    WM.JuMP.@constraint(wm.model, objective_function <= objective_var)
+    # objective_function = WM.JuMP.objective_function(wm.model)
+    # objective_var = WM.JuMP.@variable(wm.model, base_name = "obj_aux", lower_bound = 0.0)
+    # WM.JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective_var)
+    # WM.JuMP.@constraint(wm.model, objective_function <= objective_var)
 
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, owf_optimizer)
@@ -124,7 +124,12 @@ end
 function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer, nlp_optimizer; use_new::Bool = true, kwargs...)
     # Construct the OWF model that will serve as the master problem.
     wm_master = construct_owf_model(network, owf_optimizer; use_new = use_new, kwargs...)
-    return calc_heuristic(wm_master, obbt_optimizer, nlp_optimizer)
+    result_relaxed = WM.optimize_model!(wm_master; relax_integrality = true)
+    _update_tank_time_series_heur!(network, result_relaxed)
+
+    wm_master = construct_owf_model(network, owf_optimizer; use_new = use_new, kwargs...)
+    heuristic_setting = calc_heuristic(wm_master, network, obbt_optimizer, nlp_optimizer)
+    set_warm_start_from_setting!(wm_master, network, heuristic_setting, nlp_optimizer)
 
     # # Construct another version of the OWF problem that will be relaxed.
     # wm_relaxed = construct_owf_model_relaxed(network, owf_optimizer; kwargs...)
@@ -167,15 +172,43 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # # Add the heuristic callback.
     # # add_owf_heuristic_callback!(wm)
 
-    # # Optimize the master WaterModels model.
-    # result = WM.optimize_model!(wm_master)
+    # Optimize the master WaterModels model.
+    result = WM.optimize_model!(wm_master; relax_integrality = false)
 
     # return result
 end
 
 
-function calc_heuristic(wm::WM.AbstractWaterModel, mip_optimizer, nlp_optimizer)
-    return create_all_control_settings(wm)
+function filter_feasible_control_settings!(control_settings::Array{ControlSetting, 1}, control_results::Array{SimulationResult, 1})
+    feasible_indices = findall(x -> x.feasible, control_results)
+    control_settings = control_settings[feasible_indices]
+    control_results = control_results[feasible_indices]
+end
+
+
+function control_settings_from_solution(control_sol::Dict{Int, <:Any}, settings::Array{ControlSetting, 1})
+    settings = [deepcopy(settings[1]) for i in 1:length(keys(control_sol))]
+
+    for (k, nw) in enumerate(sort(collect(keys(control_sol))))
+        settings[k].network_id = nw
+        settings[k].vals = abs.(control_sol[nw])
+    end
+
+    return settings
+end
+
+
+function calc_heuristic(wm::WM.AbstractWaterModel, network::Dict{String, <:Any}, mip_optimizer, nlp_optimizer)
+    # Build all possible control settings, simulate them, and filter the results.
+    # _set_median_tank_time_series!(network)
+    settings = create_all_control_settings(wm)
+    results = simulate_control_settings(network, settings, nlp_optimizer)
+    filter_feasible_control_settings!(settings, results)
+
+    # Build and solve the linear program using the control setting results.
+    weights = solve_heuristic_linear_program(wm, settings, results, nlp_optimizer)
+    control_sol = solve_heuristic_master_program(wm, network, settings, weights, mip_optimizer, nlp_optimizer)
+    return control_settings_from_solution(control_sol, settings)
 end
 
 

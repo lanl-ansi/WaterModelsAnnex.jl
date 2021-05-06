@@ -10,7 +10,8 @@ function WM.build_wf(wm::AbstractCQModel)
     WM.variable_reservoir_flow(wm; bounded = false)
     WM.variable_tank_flow(wm; bounded = false)
 
-    # Fixed head parameters.
+    # Fixed physical parameters.
+    parameter_fixed_demand(wm)
     parameter_tank_head(wm)
     parameter_reservoir_head(wm)
 
@@ -21,7 +22,7 @@ function WM.build_wf(wm::AbstractCQModel)
 
     # Flow conservation at all nodes.
     for (i, node) in WM.ref(wm, :node)
-        WM.constraint_flow_conservation(wm, i)
+         WM.constraint_flow_conservation(wm, i)
     end
 
     # Add the strong duality constraint.

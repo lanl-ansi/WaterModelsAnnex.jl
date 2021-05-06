@@ -251,6 +251,41 @@ function _update_tank_time_series!(data::Dict{String, <:Any}, result_mn::Dict{St
 end
 
 
+function _update_tank_time_series_heur!(data::Dict{String, <:Any}, result_mn::Dict{String, <:Any})
+    if !haskey(data["time_series"], "tank")
+        # Initialize the tank time series dictionary.
+        data["time_series"]["tank"] = Dict{String, Any}()
+    end
+
+    # Get the network indices in the result dictionary.
+    nw_ids = sort([parse(Int64, n) for n in keys(result_mn["solution"]["nw"])])
+
+    # Get the relevant piece of the result dictionary.
+    sol = result_mn["solution"]["nw"]
+
+    for (i, tank) in data["tank"]
+        # Initialize the tank time series dictionary.
+        if !haskey(data["time_series"]["tank"], i)
+            data["time_series"]["tank"][i] = Dict{String, Any}()
+        end
+
+        elev = [data["node"][string(tank["node"])]["elevation"] for n in nw_ids]
+        head = [sol[string(n)]["node"][string(tank["node"])]["h"] for n in nw_ids]
+        mid_level = 0.5 * (tank["min_level"] + tank["max_level"])
+        level_75 = 0.625 * (tank["min_level"] + tank["max_level"])
+
+        # Store the tank's initial level data in the time series.
+        data["time_series"]["tank"][i]["init_level"] = head .- elev
+
+        for k in 2:length(data["time_series"]["tank"][i]["init_level"])
+            if data["time_series"]["tank"][i]["init_level"][k] < level_75
+                data["time_series"]["tank"][i]["init_level"][k] = level_75
+            end
+        end
+    end
+end
+
+
 function _reset_controllable_component_statuses(data::Dict{String, <:Any})
     for comp_type in ["pump", "regulator", "valve"]
         map(x -> x["status"] = WM.STATUS_UNKNOWN, values(data[comp_type]))
@@ -280,16 +315,14 @@ function _set_median_tank_time_series!(data::Dict{String, <:Any})
         end
 
         # Store the tank's initial level data in the time series.
-        mid_level = 0.5 * (tank["min_level"] + tank["max_level"])
+        n = data["time_series"]["num_steps"]
+        data["time_series"]["tank"][i]["init_level"] = zeros(n, 1)
+        mid_level = 0.50 * (tank["min_level"] + tank["max_level"])
+        data["time_series"]["tank"][i]["init_level"][1] = tank["init_level"]
 
         for k in 2:length(data["time_series"]["tank"][i]["init_level"])
-            if data["time_series"]["tank"][i]["init_level"][k] < mid_level
-                data["time_series"]["tank"][i]["init_level"][k] = mid_level
-            end
+            data["time_series"]["tank"][i]["init_level"][k] = mid_level
         end
-
-        # level_array = ones(data["time_series"]["num_steps"], 1) * mid_level
-        # data["time_series"]["tank"][i]["init_level"] = level_array
     end
 end
 
