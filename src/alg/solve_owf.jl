@@ -131,43 +131,22 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     heuristic_setting = calc_heuristic(wm_master, network, obbt_optimizer, nlp_optimizer)
     set_warm_start_from_setting!(wm_master, network, heuristic_setting, nlp_optimizer)
 
-    # # Construct another version of the OWF problem that will be relaxed.
-    # wm_relaxed = construct_owf_model_relaxed(network, owf_optimizer; kwargs...)
+    if use_new
+        # Add binary-binary and binary-continuous pairwise cuts.
+        cut_time = @elapsed pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
+        cut_time += @elapsed add_pairwise_cuts(wm_master, pairwise_cuts)
+        cut_time += @elapsed add_pump_volume_cuts!(wm_master)
+        WM.Memento.info(LOGGER, "Cut preprocessing completed in $(cut_time) seconds.")
+    end
 
-    # # if use_new
-    # #     # Add binary-binary and binary-continuous pairwise cuts.
-    # #     cut_time = @elapsed pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
-    # #     cut_time += @elapsed add_pairwise_cuts(wm_master, pairwise_cuts)
-    # #     cut_time += @elapsed add_pairwise_cuts(wm_relaxed, pairwise_cuts)
-    # #     cut_time += @elapsed add_pump_volume_cuts!(wm_master)
-    # #     cut_time += @elapsed add_pump_volume_cuts!(wm_relaxed)
-    # #     WM.Memento.info(LOGGER, "Cut preprocessing completed in $(cut_time) seconds.")
-    # # end
+    # TODO: Remove this once Gurobi.jl interface is fixed.
+    wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
 
-    # # Solve a relaxation of the master problem to begin.
-    # result_relaxed = WM.optimize_model!(wm_relaxed; relax_integrality = true)
+    # Add the lazy cut callback.
+    lazy_cut_stats = add_owf_lazy_cut_callback!(wm_master, network, heuristic_setting[1], nlp_optimizer)
 
-    # # TODO: Remove this once Gurobi.jl interface is fixed.
-    # wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
-
-    # # Update the tank level time series to be used in finding an initial solution.
-    # _update_tank_time_series!(network, result_relaxed)
-
-    # # Find an initial feasible solution using a heuristic.
-    # result_initial_solution = compute_initial_solution(network, obbt_optimizer, nlp_optimizer)
-
-    # return result_initial_solution
-    
-    # if result_initial_solution !== nothing
-    #     # Warm start the primary WaterModels model.
-    #     _set_initial_solution(wm_master, result_initial_solution)
-    # end
-
-    # # Add the lazy cut callback.
-    # lazy_cut_stats = add_owf_lazy_cut_callback!(wm_master, network, nlp_optimizer)
-
-    # # # Add the user cut callback.
-    # # add_owf_user_cut_callback!(wm_master)
+    # Add the user cut callback.
+    user_cut_stats = add_owf_user_cut_callback!(wm_master)
 
     # # Add the heuristic callback.
     # # add_owf_heuristic_callback!(wm)
@@ -175,7 +154,9 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Optimize the master WaterModels model.
     result = WM.optimize_model!(wm_master; relax_integrality = false)
 
-    # return result
+    # Print out relevant statistics of the solution process.
+    WM.Memento.info(LOGGER, "Lazy cuts accounted for $(lazy_cut_stats.time_elapsed) seconds.")
+    WM.Memento.info(LOGGER, "User cuts accounted for $(user_cut_stats.time_elapsed) seconds.")
 end
 
 

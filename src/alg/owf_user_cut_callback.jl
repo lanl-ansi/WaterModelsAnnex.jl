@@ -10,97 +10,106 @@ function _populate_oa_dict(wm::WM.AbstractWaterModel, comp_type::Symbol)
     return vals
 end
 
-function get_owf_user_cut_callback(wm::WM.AbstractWaterModel)
+function get_owf_user_cut_callback(wm::WM.AbstractWaterModel, callback_stats)
     head_loss, viscosity = wm.data["head_loss"], wm.data["viscosity"]
     base_length, base_time = 1.0, 1.0
     exponent = WM._get_exponent_from_head_loss_form(head_loss)
+    inner_network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
 
     qp_pipe_vals = _populate_oa_dict(wm, :pipe)
     qn_pipe_vals = _populate_oa_dict(wm, :pipe)
     qp_pump_vals = _populate_oa_dict(wm, :pump)
 
     return function callback_function(cb_data)
-        for nw in sort(collect(WM.nw_ids(wm)))[1:end-1]
-             for (a, pipe) in WM.ref(wm, nw, :pipe)
-                y = WM.var(wm, nw, :y_pipe, a)
-                y_sol = WM.JuMP.callback_value(cb_data, y)
-                r = WM._calc_pipe_resistance(pipe, head_loss, viscosity, base_length, base_time)
+        function add_user_cuts(wm::WM.AbstractWaterModel)
+            for nw in inner_network_ids
+                # y_vars = WM.var.(Ref(wm), nw, :y_pipe, WM.ids(wm, nw, :pipe))
+                # y_vals = WM.JuMP.callback_value.(Ref(cb_data), y_var)
 
-                if y_sol >= 0.5
-                    qp = WM.var(wm, nw, :qp_pipe, a)
-                    qp_sol = WM.JuMP.callback_value(cb_data, qp)
+                for (a, pipe) in WM.ref(wm, nw, :pipe)
+                    y = WM.var(wm, nw, :y_pipe, a)
+                    y_sol = WM.JuMP.callback_value(cb_data, y)
+                    r = WM._calc_pipe_resistance(pipe, head_loss, viscosity, base_length, base_time)
 
-                    dhp = WM.var(wm, nw, :dhp_pipe, a)
-                    dhp_sol = WM.JuMP.callback_value(cb_data, dhp)
-                    dhp_pred = pipe["length"] * r * max(0.0, qp_sol)^exponent
+                    if y_sol >= 0.5
+                        qp = WM.var(wm, nw, :qp_pipe, a)
+                        qp_sol = WM.JuMP.callback_value(cb_data, qp)
 
-                    if length(qp_pipe_vals[nw][a]) > 0
-                        qp_diff = maximum(abs.(qp_pipe_vals[nw][a] .- qp_sol))
+                        dhp = WM.var(wm, nw, :dhp_pipe, a)
+                        dhp_sol = WM.JuMP.callback_value(cb_data, dhp)
+                        dhp_pred = pipe["length"] * r * max(0.0, qp_sol)^exponent
+
+                        if length(qp_pipe_vals[nw][a]) > 0
+                            qp_diff = maximum(abs.(qp_pipe_vals[nw][a] .- qp_sol))
+                        else
+                            qp_diff = Inf
+                        end
+
+                        if abs(dhp_sol - dhp_pred) > 1.0e-4 && qp_diff > 1.0e-4
+                            push!(qp_pipe_vals[nw][a], max(0.0, qp_sol))
+                            lhs = WM._calc_head_loss_oa(qp, y, qp_sol, exponent)
+                            con = JuMP.@build_constraint(r * lhs <= dhp / pipe["length"])
+                            WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        end
                     else
-                        qp_diff = Inf
-                    end
+                        qn = WM.var(wm, nw, :qn_pipe, a)
+                        qn_sol = WM.JuMP.callback_value(cb_data, qn)
+                    
+                        dhn = WM.var(wm, nw, :dhn_pipe, a)
+                        dhn_sol = WM.JuMP.callback_value(cb_data, dhn)
+                        dhn_pred = pipe["length"] * r * max(0.0, qn_sol)^exponent
 
-                    if abs(dhp_sol - dhp_pred) > 1.0e-4 && qp_diff > 1.0e-4
-                        push!(qp_pipe_vals[nw][a], max(0.0, qp_sol))
-                        lhs = WM._calc_head_loss_oa(qp, y, qp_sol, exponent)
-                        con = JuMP.@build_constraint(r * lhs <= dhp / pipe["length"])
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
-                    end
-                else
-                    qn = WM.var(wm, nw, :qn_pipe, a)
-                    qn_sol = WM.JuMP.callback_value(cb_data, qn)
-                
-                    dhn = WM.var(wm, nw, :dhn_pipe, a)
-                    dhn_sol = WM.JuMP.callback_value(cb_data, dhn)
-                    dhn_pred = pipe["length"] * r * max(0.0, qn_sol)^exponent
+                        if length(qn_pipe_vals[nw][a]) > 0
+                            qn_diff = maximum(abs.(qn_pipe_vals[nw][a] .- qn_sol))
+                        else
+                            qn_diff = Inf
+                        end
 
-                    if length(qn_pipe_vals[nw][a]) > 0
-                        qn_diff = maximum(abs.(qn_pipe_vals[nw][a] .- qn_sol))
-                    else
-                        qn_diff = Inf
-                    end
-
-                    if abs(dhn_sol - dhn_pred) > 1.0e-4 && qn_diff > 1.0e-4
-                        push!(qn_pipe_vals[nw][a], max(0.0, qn_sol))
-                        lhs = WM._calc_head_loss_oa(qn, 1.0 - y, qn_sol, exponent)
-                        con = JuMP.@build_constraint(r * lhs <= dhn / pipe["length"])
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        if abs(dhn_sol - dhn_pred) > 1.0e-4 && qn_diff > 1.0e-4
+                            push!(qn_pipe_vals[nw][a], max(0.0, qn_sol))
+                            lhs = WM._calc_head_loss_oa(qn, 1.0 - y, qn_sol, exponent)
+                            con = JuMP.@build_constraint(r * lhs <= dhn / pipe["length"])
+                            WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        end
                     end
                 end
-            end
 
-            for (a, pump) in WM.ref(wm, nw, :pump)
-                z = WM.var(wm, nw, :z_pump, a)
-                z_sol = WM.JuMP.callback_value(cb_data, z)
+                for (a, pump) in WM.ref(wm, nw, :pump)
+                    z = WM.var(wm, nw, :z_pump, a)
+                    z_sol = WM.JuMP.callback_value(cb_data, z)
 
-                if z_sol >= 0.5
-                    qp = WM.var(wm, nw, :qp_pump, a)
-                    qp_sol = WM.JuMP.callback_value(cb_data, qp)
+                    if z_sol >= 0.5
+                        qp = WM.var(wm, nw, :qp_pump, a)
+                        qp_sol = WM.JuMP.callback_value(cb_data, qp)
 
-                    g = WM.var(wm, nw, :g_pump, a)
-                    g_sol = WM.JuMP.callback_value(cb_data, g)
+                        g = WM.var(wm, nw, :g_pump, a)
+                        g_sol = WM.JuMP.callback_value(cb_data, g)
 
-                    # Calculate the head curve function and its derivative.
-                    head_curve_func = WM._calc_head_curve_function(pump)
-                    head_curve_deriv = WM._calc_head_curve_derivative(pump)
+                        # Calculate the head curve function and its derivative.
+                        head_curve_func = WM._calc_head_curve_function(pump)
+                        head_curve_deriv = WM._calc_head_curve_derivative(pump)
 
-                    g_pred = head_curve_func(qp_sol)
-                    df_pred = head_curve_deriv(qp_sol)
+                        g_pred = head_curve_func(qp_sol)
+                        df_pred = head_curve_deriv(qp_sol)
 
-                    if length(qp_pump_vals[nw][a]) > 0
-                        qp_diff = maximum(abs.(qp_pump_vals[nw][a] .- qp_sol))
-                    else
-                        qp_diff = Inf
-                    end
+                        if length(qp_pump_vals[nw][a]) > 0
+                            qp_diff = maximum(abs.(qp_pump_vals[nw][a] .- qp_sol))
+                        else
+                            qp_diff = Inf
+                        end
 
-                    if abs(g_sol - g_pred) > 1.0e-4 && qp_diff > 1.0e-4
-                        push!(qp_pump_vals[nw][a], max(0.0, qp_sol))
-                        con = JuMP.@build_constraint(g <= g_pred * z + df_pred * (qp - qp_sol * z))
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        if abs(g_sol - g_pred) > 1.0e-4 && qp_diff > 1.0e-4
+                            push!(qp_pump_vals[nw][a], max(0.0, qp_sol))
+                            con = JuMP.@build_constraint(g <= g_pred * z + df_pred * (qp - qp_sol * z))
+                            WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        end
                     end
                 end
             end
         end
+
+        callback_stats.time_elapsed += @elapsed add_user_cuts(wm)
+        callback_stats.num_calls += 1
     end
 end
 
@@ -299,6 +308,8 @@ end
 
 
 function add_owf_user_cut_callback!(wm::WM.AbstractWaterModel)
-    callback_function = get_owf_user_cut_callback(wm)
+    callback_stats = CallbackStats(0.0, 0)
+    callback_function = get_owf_user_cut_callback(wm, callback_stats)
     WM._MOI.set(wm.model, WM._MOI.UserCutCallback(), callback_function)
+    return callback_stats
 end

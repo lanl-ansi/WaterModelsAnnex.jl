@@ -195,7 +195,7 @@ function add_recovery_feasibility_cut!(wm::WM.AbstractWaterModel, cb_data)
     vars = _get_pump_indicator_variables_to_nw(wm, length(WM.nw_ids(wm)) - 1)
     zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
 
-    # If the solution is not feasible (according to a comparison with WNTR), add a no-good cut.
+    # If the solution is not feasible (according to a comparison with simulation), add a no-good cut.
     con = WM.JuMP.@build_constraint(sum(zero_vars) >= 1)
     WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
 end
@@ -218,20 +218,49 @@ function add_objective_cut!(wm::WM.AbstractWaterModel, cb_data, objective_value:
 end
 
 
-function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, optimizer, stats)
-    return function callback_function(cb_data)
-        stats.time_elapsed += @elapsed result_sim, nw_infeasible, cost, recovered =
-            simulate_callback_solution(wm, cb_data, network, optimizer)
+function update_master_setting_at_nw!(wm_master, wm_sim, setting, cb_data, nw)
+    setting.network_id = nw
 
-        if !feasible_simulation_result(result_sim) && !recovered
+    for (i, var_id) in enumerate(setting.variable_indices)
+        var_id.network_index = nw
+        var = WM.var(wm_master, nw, var_id.variable_symbol, var_id.component_index)
+        setting.vals[i] = WM.JuMP.callback_value(cb_data, var)
+    end
+end
+
+
+function simulate_master_solution(wm_master, wm_sim, setting, cb_data)
+    network_ids = sort(collect(WM.nw_ids(wm_master)))[1:end-1]
+
+    for nw in network_ids
+        update_master_setting_at_nw!(wm_master, wm_sim, setting, cb_data, nw)
+        result = simulate_control_setting(wm_sim, setting)
+        !result.feasible && return nw
+        update_tank_time_series(wm_sim.data, result, nw)
+    end
+
+    if !tank_levels_recovered(wm_sim.data)
+        return network_ids[end] + 1
+    else
+        return nothing
+    end
+end
+
+
+function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, setting, optimizer, stats)
+    wm_sim = _instantiate_cq_model(network, optimizer)
+    network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
+
+    return function callback_function(cb_data)
+        stats.time_elapsed += @elapsed infeasible_nw =
+            simulate_master_solution(wm, wm_sim, setting, cb_data)
+
+        if infeasible_nw == network_ids[end] + 1
             stats.time_elapsed += @elapsed add_recovery_feasibility_cut!(wm, cb_data)
-        elseif !feasible_simulation_result(result_sim) && nw_infeasible !== nothing
-            stats.time_elapsed += @elapsed add_feasibility_cut!(wm, cb_data, nw_infeasible)
-        elseif feasible_simulation_result(result_sim)
-            # add_objective_cut!(wm, cb_data, cost)
+        elseif infeasible_nw !== nothing
+            stats.time_elapsed += @elapsed add_feasibility_cut!(wm, cb_data, infeasible_nw)
         end
 
-        # Update the number of times the lazy callback was called.
         stats.num_calls += 1
     end
 end
@@ -243,9 +272,9 @@ mutable struct CallbackStats
 end
 
 
-function add_owf_lazy_cut_callback!(wm::WM.AbstractWaterModel, network, optimizer)
+function add_owf_lazy_cut_callback!(wm::WM.AbstractWaterModel, network, setting, optimizer)
     callback_stats = CallbackStats(0.0, 0)
-    callback_function = get_owf_lazy_cut_callback(wm, network, optimizer, callback_stats)
+    callback_function = get_owf_lazy_cut_callback(wm, network, setting, optimizer, callback_stats)
     WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), callback_function)
     return callback_stats
 end

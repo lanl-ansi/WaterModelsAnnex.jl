@@ -31,8 +31,6 @@ function set_warm_start_from_setting!(wm, network, settings, optimizer)
                 y_val = q_val >= 0.0 ? 1.0 : 0.0
                 qp_val, qn_val = q_val * y_val, q_val * (1.0 - y_val)
 
-                # println(nw, " ", comp_type, " ", i, " ", qp_val, " ", qn_val)
-
                 qp_var = WM.var(wm, nw, Symbol("qp_" * string(comp_type)), i)
                 qn_var = WM.var(wm, nw, Symbol("qn_" * string(comp_type)), i)
                 y_var = WM.var(wm, nw, Symbol("y_" * string(comp_type)), i)
