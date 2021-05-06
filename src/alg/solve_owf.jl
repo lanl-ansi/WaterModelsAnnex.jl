@@ -101,7 +101,7 @@ function construct_owf_model(network::Dict{String, Any}, owf_optimizer; use_new:
 
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, owf_optimizer)
-    # WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
 
     # Return the WaterModels object.
     return wm
@@ -125,14 +125,15 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Construct the OWF model that will serve as the master problem.
     wm_master = construct_owf_model(network, owf_optimizer; use_new = use_new, kwargs...)
     result_relaxed = WM.optimize_model!(wm_master; relax_integrality = true)
-    _update_tank_time_series_heur!(network, result_relaxed)
 
+    _update_tank_time_series_heur!(network, result_relaxed)
     wm_master = construct_owf_model(network, owf_optimizer; use_new = use_new, kwargs...)
     heuristic_setting = calc_heuristic(wm_master, network, obbt_optimizer, nlp_optimizer)
     set_warm_start_from_setting!(wm_master, network, heuristic_setting, nlp_optimizer)
 
     if use_new
         # Add binary-binary and binary-continuous pairwise cuts.
+        WM.Memento.info(LOGGER, "Beginning cut preprocessing routine.")
         cut_time = @elapsed pairwise_cuts = compute_pairwise_cuts(network, obbt_optimizer)
         cut_time += @elapsed add_pairwise_cuts(wm_master, pairwise_cuts)
         cut_time += @elapsed add_pump_volume_cuts!(wm_master)
@@ -145,18 +146,30 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     # Add the lazy cut callback.
     lazy_cut_stats = add_owf_lazy_cut_callback!(wm_master, network, heuristic_setting[1], nlp_optimizer)
 
-    # Add the user cut callback.
-    user_cut_stats = add_owf_user_cut_callback!(wm_master)
+    if use_new
+        # Add the user cut callback.
+        WM.Memento.info(LOGGER, "Building and applying user cut callback routine.")
+        user_cut_stats = add_owf_user_cut_callback!(wm_master)
+    end
 
     # # Add the heuristic callback.
     # # add_owf_heuristic_callback!(wm)
 
     # Optimize the master WaterModels model.
+    WM.Memento.info(LOGGER, "Solving the master OWF problem.")
     result = WM.optimize_model!(wm_master; relax_integrality = false)
+    WM.Memento.info(LOGGER, "Solved for $(result["solve_time"]) seconds.")
 
     # Print out relevant statistics of the solution process.
-    WM.Memento.info(LOGGER, "Lazy cuts accounted for $(lazy_cut_stats.time_elapsed) seconds.")
-    WM.Memento.info(LOGGER, "User cuts accounted for $(user_cut_stats.time_elapsed) seconds.")
+    percent_lazy = round(lazy_cut_stats.time_elapsed / result["solve_time"] * 100.0; digits = 2)
+    WM.Memento.info(LOGGER, "Lazy cuts accounted for $(percent_lazy)% of solve time.")
+
+    if use_new
+        percent_user = round(user_cut_stats.time_elapsed / result["solve_time"] * 100.0; digits = 2)
+        WM.Memento.info(LOGGER, "User cuts accounted for $(percent_user)% of solve time.")
+    end
+
+    return result
 end
 
 
@@ -181,187 +194,20 @@ end
 
 function calc_heuristic(wm::WM.AbstractWaterModel, network::Dict{String, <:Any}, mip_optimizer, nlp_optimizer)
     # Build all possible control settings, simulate them, and filter the results.
-    # _set_median_tank_time_series!(network)
+    WM.Memento.info(LOGGER, "Precomputing all possible heuristic control settings.")
     settings = create_all_control_settings(wm)
+
+    WM.Memento.info(LOGGER, "Simulating all heuristic control settings.")
     results = simulate_control_settings(network, settings, nlp_optimizer)
+
+    WM.Memento.info(LOGGER, "Filtering feasible heuristic control settings.")
     filter_feasible_control_settings!(settings, results)
 
-    # Build and solve the linear program using the control setting results.
+    WM.Memento.info(LOGGER, "Solving heuristic linear programming relaxation.")
     weights = solve_heuristic_linear_program(wm, settings, results, nlp_optimizer)
+
+    WM.Memento.info(LOGGER, "Solving heuristic master mixed-integer program.")
     control_sol = solve_heuristic_master_program(wm, network, settings, weights, mip_optimizer, nlp_optimizer)
+
     return control_settings_from_solution(control_sol, settings)
-end
-
-
-function compute_initial_solution(network::Dict{String, <:Any}, obbt_optimizer, nlp_optimizer)
-    time_pp = @elapsed schedules = calc_possible_schedules(network, obbt_optimizer, nlp_optimizer)
-    return schedules
-    WM.Memento.info(LOGGER, "[HEUR] Preprocessing completed in $(time_pp) seconds.")
-
-    time_lp = @elapsed weights = solve_heuristic_problem(network, schedules, obbt_optimizer)
-    WM.Memento.info(LOGGER, "[HEUR] Linear program solved in $(time_lp) seconds.")
-
-    if weights !== nothing
-        time_bd = @elapsed result = solve_heuristic_master(network, schedules, weights, nlp_optimizer, obbt_optimizer)
-        WM.Memento.info(LOGGER, "[HEUR] Benders decomposition solved in $(time_bd) seconds.")
-        return result
-    else
-        return nothing
-    end
-end
-
-
-function _set_solution_pumps(wm::WM.AbstractNCDModel, result::Dict{String,<:Any})
-    nw_ids = sort(collect(WM.nw_ids(wm)))
-
-    for nw in nw_ids[1:end-1]
-        sol_nw = result["solution"]["nw"][string(nw)]
-
-        for (i, pump) in WM.ref(wm, nw, :pump)
-            sol_pump = sol_nw["pump"][string(i)]
-
-            z_val = Float64(Int(sol_pump["status"]))
-            JuMP.set_start_value(WM.var(wm, nw, :z_pump, i), z_val)
-            JuMP.set_start_value(WM.var(wm, nw, :y_pump, i), z_val > 0.0 ? 1.0 : 0.0)
-
-            q_val = z_val * sol_pump["q"]
-            JuMP.set_start_value(WM.var(wm, nw, :qp_pump, i), q_val * (q_val >= 0.0))
-            JuMP.set_start_value(WM.var(wm, nw, :qn_pump, i), q_val * (q_val < 0.0))
-            JuMP.set_start_value(WM.var(wm, nw, :Ps_pump, i), z_val * sol_pump["Ps"])
-
-            h_i = sol_nw["node"][string(pump["node_fr"])]["h"]
-            h_j = sol_nw["node"][string(pump["node_to"])]["h"]
-
-            g_sol = z_val * sol_pump["g"]
-            JuMP.set_start_value(WM.var(wm, nw, :g_pump, i), g_sol)
-
-            if isa(wm, AbstractLRDXModel)
-                c =  WM._calc_head_curve_coefficients(pump)
-                qp_nl = (1.0 / 3.0) * c[1] * q_val^3 + 0.5 * c[2] * q_val^2 + c[3] * q_val
-                JuMP.set_start_value(WM.var(wm, nw, :qp_nl_pump, i), qp_nl)
-
-                g_nl_sol = (((-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_sol + c[2]^2) -
-                    c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
-                    c[1] * g_sol + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *
-                    (-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_sol + c[2]^2) -
-                    c[2])) / (2.0 * c[1]) - (g_sol * (-sqrt(-4.0 * c[1] * c[3] +
-                    4.0 * c[1] * g_sol + c[2]^2) - c[2])) / (2.0 * c[1]))) * z_val
-
-                g_nl = WM.var(wm, nw, :g_nl_pump, i)
-                JuMP.set_start_value(g_nl, g_nl_sol)
-            end
-        end
-    end
-end
-
-
-function _set_initial_solution(wm::WM.AbstractWaterModel, result::Dict{String, <:Any})
-    _set_solution_pumps(wm, result)
-    nw_ids = sort(collect(WM.nw_ids(wm)))
-
-    for nw in nw_ids[1:end-1]
-        for (i, demand) in WM.ref(wm, nw, :dispatchable_demand)
-            qd = WM.var(wm, nw, :q_demand, i)
-            qd_sol = result["solution"]["nw"][string(nw)]["demand"][string(i)]["q"]
-            JuMP.set_start_value(qd, qd_sol)
-        end
-
-        for (i, reservoir) in WM.ref(wm, nw, :reservoir)
-            qr = WM.var(wm, nw, :q_reservoir, i)
-            qr_sol = result["solution"]["nw"][string(nw)]["reservoir"][string(i)]["q"]
-            JuMP.set_start_value(qr, qr_sol)
-        end
-
-        for (i, tank) in WM.ref(wm, nw, :tank)
-            qt = WM.var(wm, nw, :q_tank, i)
-            qt_sol = result["solution"]["nw"][string(nw)]["tank"][string(i)]["q"]
-            JuMP.set_start_value(qt, qt_sol)
-
-            if isa(wm, AbstractLRDXModel)
-                qh_nl_tank = WM.var(wm, nw, :qh_nl_tank, i)
-                h_sol = result["solution"]["nw"][string(nw)]["node"][string(tank["node"])]["h"]
-                qh_nl_sol = JuMP.set_start_value(qh_nl_tank, qt_sol * h_sol)
-            end
-        end
-
-        for comp_type in [:pipe, :des_pipe]
-            for (i, comp) in WM.ref(wm, nw, comp_type)
-                comp_sol = result["solution"]["nw"][string(nw)][string(comp_type)][string(i)]
-                dhp = WM.var(wm, nw, Symbol("dhp_" * string(comp_type)), i)
-                dhn = WM.var(wm, nw, Symbol("dhn_" * string(comp_type)), i)
-
-                h_i = result["solution"]["nw"][string(nw)]["node"][string(comp["node_fr"])]["h"]
-                h_j = result["solution"]["nw"][string(nw)]["node"][string(comp["node_to"])]["h"]
-
-                JuMP.set_start_value(dhp, max(0.0, h_i - h_j))
-                JuMP.set_start_value(dhn, max(0.0, h_j - h_i))
-            end
-        end
-        
-        for (i, node) in WM.ref(wm, nw, :node)
-            h_sol = result["solution"]["nw"][string(nw)]["node"][string(i)]["h"]
-            JuMP.set_start_value(WM.var(wm, nw, :h, i), h_sol)
-        end
-
-        for (i, pipe) in WM.ref(wm, nw, :pipe)
-            if isa(wm, AbstractLRDXModel)
-                pipe_sol = result["solution"]["nw"][string(nw)]["pipe"][string(i)]
-                qp_sol, qn_sol = max(0.0, pipe_sol["q"]), max(0.0, -pipe_sol["q"])
-                qp_nl, qn_nl = WM.var(wm, nw, :qp_nl_pipe, i), WM.var(wm, nw, :qn_nl_pipe, i)
-                dhp_nl, dhn_nl = WM.var(wm, nw, :dhp_nl_pipe, i), WM.var(wm, nw, :dhn_nl_pipe, i)
-
-                L, exponent = pipe["length"], WM.ref(wm, nw, :alpha)
-                r = WM._calc_pipe_resistance(pipe, wm.data["head_loss"], wm.data["viscosity"], 1.0, 1.0)
-
-                qp_nl_sol = L * r / (1.0 + exponent) * qp_sol^(1.0 + exponent)
-                qn_nl_sol = L * r / (1.0 + exponent) * qn_sol^(1.0 + exponent)
-
-                JuMP.set_start_value(qp_nl, qp_nl_sol)
-                JuMP.set_start_value(qn_nl, qn_nl_sol)
-
-                dhp_sol, dhn_sol = L * r * qp_sol^exponent, L * r * qn_sol^exponent
-
-                L_r, r_r = L^(-1.0 / exponent), r^(-1.0 / exponent)
-                dhp_nl_sol = L_r * r_r * exponent / (1.0 + exponent) * dhp_sol^(1.0 + 1.0 / exponent)
-                dhn_nl_sol = L_r * r_r * exponent / (1.0 + exponent) * dhn_sol^(1.0 + 1.0 / exponent)
-
-                JuMP.set_start_value(dhp_nl, dhp_nl_sol)
-                JuMP.set_start_value(dhn_nl, dhn_nl_sol)
-            end
-        end
-
-        for comp_type in [:pipe, :des_pipe, :regulator, :short_pipe, :valve]
-            for (i, comp) in WM.ref(wm, nw, comp_type)
-                y = WM.var(wm, nw, Symbol("y_" * string(comp_type)), i)
-                qp = WM.var(wm, nw, Symbol("qp_" * string(comp_type)), i)
-                qn = WM.var(wm, nw, Symbol("qn_" * string(comp_type)), i)
-                comp_sol = result["solution"]["nw"][string(nw)][string(comp_type)][string(i)]
-
-                if comp_type in [:pump, :regulator, :valve]                    
-                    q_sol = Float64(Int(comp_sol["status"])) * comp_sol["q"]
-                else
-                    q_sol = comp_sol["q"]
-                end
-
-                JuMP.set_start_value(qp, max(0.0, q_sol))
-                JuMP.set_start_value(qn, max(0.0, -q_sol))
-                y_start = q_sol > 1.0e-6 ? 1.0 : 0.0
-                JuMP.set_start_value(y, y_start)
-            end
-        end
-
-        for comp_type in [:regulator, :valve]
-            for (i, comp) in WM.ref(wm, nw, comp_type)
-                z = WM.var(wm, nw, Symbol("z_" * string(comp_type)), i)
-                comp_sol = result["solution"]["nw"][string(nw)][string(comp_type)][string(i)]
-                z_start = Float64(Int(comp_sol["status"]))
-                JuMP.set_start_value(z, z_start)
-            end
-        end
-    end
-
-    for (i, node) in WM.ref(wm, nw_ids[end], :node)
-        h_sol = result["solution"]["nw"][string(nw_ids[end])]["node"][string(i)]["h"]
-        JuMP.set_start_value(WM.var(wm, nw_ids[end], :h, i), h_sol)
-    end
 end

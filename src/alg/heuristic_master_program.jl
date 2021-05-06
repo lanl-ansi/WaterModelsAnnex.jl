@@ -157,6 +157,7 @@ end
 
 
 function solve_heuristic_master_program(wm, network, settings, weights, optimizer, nlp_optimizer)
+    Random.seed!(0) # This can be commented out.
     model = JuMP.Model(optimizer)
 
     z = heuristic_master_program_indicator_variables!(model, settings)
@@ -169,7 +170,7 @@ function solve_heuristic_master_program(wm, network, settings, weights, optimize
     while num_iterations <= 50
         JuMP.optimize!(model)
         JuMP.primal_status(model) == WM._MOI.FEASIBLE_POINT && break
-        WM.Memento.info(LOGGER, "Attempting heuristic solution discovery.")
+        WM.Memento.info(LOGGER, "Reattempting heuristic solution discovery.")
 
         model = JuMP.Model(optimizer)
         z = heuristic_master_program_indicator_variables!(model, settings)

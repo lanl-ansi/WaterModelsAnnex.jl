@@ -34,9 +34,15 @@ function simulate_control_settings(network::Dict{String, <:Any}, control_setting
     networks = [deepcopy(network) for i in 1:Threads.nthreads()]
     wms = [_instantiate_cq_model(networks[i], optimizer) for i in 1:Threads.nthreads()]
     results = [SimulationResult(false, Dict{Int, Float64}(), 0.0) for n in 1:length(control_settings)]
+    print_next = Int(ceil(length(control_settings) / 10))
     
     Threads.@threads for k in 1:length(control_settings)
         results[k] = simulate_control_setting(wms[Threads.threadid()], control_settings[k])
+
+        # if k == print_next
+        #     WM.Memento.info(LOGGER, "Simulated $(k) of $(length(control_settings)) possible heuristic controls.")
+        #     print_next += Int(ceil(length(control_settings) / 10))
+        # end
     end
 
     return results
