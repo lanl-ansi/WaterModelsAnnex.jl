@@ -18,12 +18,15 @@ end
 
 
 function solve_owf(network_path::String, modification_path::String, obbt_optimizer, owf_optimizer, nlp_optimizer; kwargs...)
+    # Print the amount of time spent to perform the above.
+    WM.Memento.info(LOGGER, "Starting optimization-based bound tightening.")
+
     # Tighten bounds in the network using optimization-based bound tightening.
     obbt_time = @elapsed network = solve_obbt(network_path,
         modification_path, obbt_optimizer; kwargs...)
 
     # Print the amount of time spent to perform the above.
-    WM.Memento.info(LOGGER, "OBBT completed in $(obbt_time) seconds.")
+    WM.Memento.info(LOGGER, "Optimization-based bound tightening completed in $(obbt_time) seconds.")
 
     # Solve the OWF problem using the network from above.
     return solve_owf(network_path, network, obbt_optimizer,
@@ -123,8 +126,8 @@ end
 
 function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer, nlp_optimizer; use_new::Bool = true, kwargs...)
     # Construct the OWF model that will serve as the master problem.
-    wm_master = construct_owf_model(network, owf_optimizer; use_new = use_new, kwargs...)
-    result_relaxed = WM.optimize_model!(wm_master; relax_integrality = true)
+    wm_relaxed = construct_owf_model(network, obbt_optimizer; use_new = use_new, kwargs...)
+    result_relaxed = WM.optimize_model!(wm_relaxed; relax_integrality = true)
 
     _update_tank_time_series_heur!(network, result_relaxed)
     wm_master = construct_owf_model(network, owf_optimizer; use_new = use_new, kwargs...)
