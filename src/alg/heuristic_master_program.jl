@@ -1,8 +1,17 @@
 function heuristic_master_program_indicator_variables!(model::JuMP.Model, settings)
-    network_ids = unique([x.network_id for x in settings])
-    return Dict{Int, Any}(nw => JuMP.@variable(model,
+    network_ids = sort(unique([x.network_id for x in settings]))
+    vars = Dict{Int, Any}(nw => JuMP.@variable(model,
         [i in 1:length(settings[1].vals)],
         binary = true) for nw in network_ids)
+
+    # # TODO: remove this
+    # for nw in network_ids
+    #     for i in 1:length(settings[1].vals) - 1
+    #         JuMP.@constraint(model, vars[nw][i] >= vars[nw][i+1])
+    #     end
+    # end
+
+    return vars
 end
 
 
@@ -156,7 +165,7 @@ function get_master_program_lazy_callback(network, model::JuMP.Model, z, setting
 end
 
 
-function solve_heuristic_master_program(wm, network, settings, weights, optimizer, nlp_optimizer)
+function solve_heuristic_master_program(wm, network, settings, weights, optimizer, nlp_optimizer; max_iterations = 10)
     Random.seed!(0) # This can be commented out.
     model = JuMP.Model(optimizer)
 
@@ -167,7 +176,7 @@ function solve_heuristic_master_program(wm, network, settings, weights, optimize
     add_master_program_lazy_callback!(network, model, z, settings, nlp_optimizer)
     num_iterations = 0
 
-    while num_iterations <= 50
+    while num_iterations <= max_iterations
         JuMP.optimize!(model)
         JuMP.primal_status(model) == WM._MOI.FEASIBLE_POINT && break
         WM.Memento.info(LOGGER, "Reattempting heuristic solution discovery.")

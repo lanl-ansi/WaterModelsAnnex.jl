@@ -92,19 +92,19 @@ function construct_owf_model(network::Dict{String, Any}, owf_optimizer; use_new:
     network_mn = WM.make_multinetwork(network)
 
     # Specify model options and construct the multinetwork OWF model.
-    ext = Dict(:pipe_breakpoints => 3, :pump_breakpoints => 3)
+    ext = Dict(:pipe_breakpoints => 2, :pump_breakpoints => 2)
     model_type = WM.LRDWaterModel #use_new ? LRDXWaterModel : WM.LRDWaterModel
     wm = WM.instantiate_model(network_mn, model_type, WM.build_mn_owf; ext = ext)
 
     # Constrain an auxiliary objective variable by the objective function.
-    # objective_function = WM.JuMP.objective_function(wm.model)
-    # objective_var = WM.JuMP.@variable(wm.model, base_name = "obj_aux", lower_bound = 0.0)
-    # WM.JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective_var)
-    # WM.JuMP.@constraint(wm.model, objective_function <= objective_var)
+    objective_function = WM.JuMP.objective_function(wm.model)
+    objective_var = WM.JuMP.@variable(wm.model, base_name = "obj_aux", lower_bound = 0.0)
+    WM.JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective_var)
+    WM.JuMP.@constraint(wm.model, objective_function <= objective_var)
 
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, owf_optimizer)
-    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+    # WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
 
     # Return the WaterModels object.
     return wm
@@ -155,8 +155,8 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
         user_cut_stats = add_owf_user_cut_callback!(wm_master)
     end
 
-    # # Add the heuristic callback.
-    # # add_owf_heuristic_callback!(wm)
+    # Add the heuristic callback.
+    # add_owf_heuristic_callback!(wm_master, network, nlp_optimizer, obbt_optimizer)
 
     # Optimize the master WaterModels model.
     WM.Memento.info(LOGGER, "Solving the master OWF problem.")
