@@ -278,9 +278,9 @@ function _update_tank_time_series_heur!(data::Dict{String, <:Any}, result_mn::Di
         data["time_series"]["tank"][i]["init_level"] = head .- elev
 
         for k in 2:length(data["time_series"]["tank"][i]["init_level"])
-            if data["time_series"]["tank"][i]["init_level"][k] < level_625
-                data["time_series"]["tank"][i]["init_level"][k] = level_625
-            end
+            # if data["time_series"]["tank"][i]["init_level"][k] < mid_level
+                data["time_series"]["tank"][i]["init_level"][k] = mid_level
+            # end
         end
     end
 end

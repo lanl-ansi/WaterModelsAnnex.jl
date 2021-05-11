@@ -144,6 +144,19 @@ function _get_indicator_variables(wm::WM.AbstractWaterModel)
 end
 
 
+function _get_direction_variables(wm::WM.AbstractWaterModel)
+    vars = Array{WM.JuMP.VariableRef, 1}()
+
+    for var_sym in [:y_des_pipe, :y_pipe, :y_short_pipe, :y_pump, :y_regulator, :y_valve]
+        for nw_id in sort(collect(WM.nw_ids(wm)))[1:end-1]
+            append!(vars, vcat(WM.var(wm, nw_id, var_sym)...))
+        end
+    end
+
+    return vars
+end
+
+
 function _get_pump_indicator_variables_to_nw(wm::WM.AbstractWaterModel, nw_last::Int)
     vars = Array{WM.JuMP.VariableRef, 1}()
     network_ids = sort(collect(WM.nw_ids(wm)))[1:nw_last]
@@ -192,7 +205,7 @@ end
 
 function add_recovery_feasibility_cut!(wm::WM.AbstractWaterModel, cb_data)    
     # Collect the current integer solution into "zero" and "one" buckets.
-    vars = _get_pump_indicator_variables_to_nw(wm, length(WM.nw_ids(wm)) - 1)
+    vars = _get_pump_indicator_variables_to_nw(wm, sort(collect(WM.nw_ids(wm)))[end-1])
     zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
 
     # If the solution is not feasible (according to a comparison with simulation), add a no-good cut.
@@ -208,12 +221,11 @@ function add_objective_cut!(wm::WM.AbstractWaterModel, cb_data, objective_value:
     one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
 
     # Compute the objectives of the relaxation and WNTR solution.
-    objective_var = WM.JuMP.variable_by_name(wm.model, "obj_aux")
-    relaxed_objective = WM.JuMP.callback_value(cb_data, objective_var)
+    obj_func = WM.JuMP.objective_function(wm.model)
 
     # Add a cut to raise the objective for the solution to the true objective.
-    bin_expr = objective_value * (length(one_vars) - sum(one_vars) + sum(zero_vars))
-    con = WM.JuMP.@build_constraint(objective_var >= objective_value - bin_expr)
+    bin_expr = objective_value * (sum(one_vars) - length(one_vars) + sum(zero_vars))
+    con = WM.JuMP.@build_constraint(obj_func >= objective_value - bin_expr)
     WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
 end
 
@@ -231,18 +243,20 @@ end
 
 function simulate_master_solution(wm_master, wm_sim, setting, cb_data)
     network_ids = sort(collect(WM.nw_ids(wm_master)))[1:end-1]
+    total_cost = 0.0
 
     for nw in network_ids
         update_master_setting_at_nw!(wm_master, wm_sim, setting, cb_data, nw)
         result = simulate_control_setting(wm_sim, setting)
-        !result.feasible && return nw
+        !result.feasible && return 0.0, nw
         update_tank_time_series(wm_sim.data, result, nw)
+        total_cost += result.cost
     end
 
     if !tank_levels_recovered(wm_sim.data)
-        return network_ids[end] + 1
+        return total_cost, network_ids[end] + 1
     else
-        return nothing
+        return total_cost, nothing
     end
 end
 
@@ -252,13 +266,15 @@ function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, setting, 
     network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
 
     return function callback_function(cb_data)
-        stats.time_elapsed += @elapsed infeasible_nw =
+        stats.time_elapsed += @elapsed cost, infeasible_nw =
             simulate_master_solution(wm, wm_sim, setting, cb_data)
 
         if infeasible_nw == network_ids[end] + 1
             stats.time_elapsed += @elapsed add_recovery_feasibility_cut!(wm, cb_data)
         elseif infeasible_nw !== nothing
             stats.time_elapsed += @elapsed add_feasibility_cut!(wm, cb_data, infeasible_nw)
+        else
+            # stats.time_elapsed += @elapsed add_objective_cut!(wm, cb_data, cost)
         end
 
         stats.num_calls += 1

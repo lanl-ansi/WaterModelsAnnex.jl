@@ -3,6 +3,7 @@ function set_warm_start_from_setting!(wm, network, settings, optimizer)
     node_ids = sort(collect(WM.ids(wm_sim, :node)))
     node_map = Dict(node_ids[i] => i for i in 1:length(node_ids))
     nw_end = sort(collect(WM.nw_ids(wm)))[end]
+    total_cost = 0.0
 
     for nw in sort([x.network_id for x in settings])
         result = simulate_control_setting(wm_sim, settings[nw])
@@ -110,5 +111,10 @@ function set_warm_start_from_setting!(wm, network, settings, optimizer)
             Ps = P / (WM._DENSITY * WM._GRAVITY)
             JuMP.set_start_value(WM.var(wm, nw, :Ps_pump, i), Ps)
         end
+
+        total_cost += calc_simulation_cost(wm_sim)
     end
+
+    # Return the cost of the warm-started solution.
+    return total_cost
 end

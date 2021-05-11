@@ -92,19 +92,13 @@ function construct_owf_model(network::Dict{String, Any}, owf_optimizer; use_new:
     network_mn = WM.make_multinetwork(network)
 
     # Specify model options and construct the multinetwork OWF model.
-    ext = Dict(:pipe_breakpoints => 2, :pump_breakpoints => 2)
+    ext = Dict(:pipe_breakpoints => 3, :pump_breakpoints => 3)
     model_type = WM.LRDWaterModel #use_new ? LRDXWaterModel : WM.LRDWaterModel
     wm = WM.instantiate_model(network_mn, model_type, WM.build_mn_owf; ext = ext)
 
-    # Constrain an auxiliary objective variable by the objective function.
-    objective_function = WM.JuMP.objective_function(wm.model)
-    objective_var = WM.JuMP.@variable(wm.model, base_name = "obj_aux", lower_bound = 0.0)
-    WM.JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective_var)
-    WM.JuMP.@constraint(wm.model, objective_function <= objective_var)
-
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, owf_optimizer)
-    # WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
 
     # Return the WaterModels object.
     return wm
@@ -132,7 +126,8 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
     _update_tank_time_series_heur!(network, result_relaxed)
     wm_master = construct_owf_model(network, owf_optimizer; use_new = use_new, kwargs...)
     heuristic_setting = calc_heuristic(wm_master, network, obbt_optimizer, nlp_optimizer)
-    set_warm_start_from_setting!(wm_master, network, heuristic_setting, nlp_optimizer)
+    heur_cost = set_warm_start_from_setting!(wm_master, network, heuristic_setting, nlp_optimizer)
+    WM.Memento.info(LOGGER, "Heuristic found solution with objective $(round(heur_cost; digits = 2)).")
 
     if use_new
         # Add binary-binary and binary-continuous pairwise cuts.
