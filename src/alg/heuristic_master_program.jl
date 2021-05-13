@@ -6,6 +6,14 @@ function heuristic_master_program_indicator_variables!(model::JuMP.Model, settin
 end
 
 
+function heuristic_master_program_switch_variables!(model::JuMP.Model, settings)
+    network_ids = sort(unique([x.network_id for x in settings]))[2:end]
+    return Dict{Int, Any}(nw => JuMP.@variable(model,
+        [i in 1:length(settings[1].vals)],
+        binary = true) for nw in network_ids)
+end
+
+
 function add_master_program_symmetry_constraints!(wm::WM.AbstractWaterModel, model::JuMP.Model, z, settings)
     network_ids = sort(unique([x.network_id for x in settings]))
     setting_vars = settings[1].variable_indices
@@ -26,23 +34,55 @@ function add_master_program_symmetry_constraints!(wm::WM.AbstractWaterModel, mod
 end
 
 
-function add_master_program_switch_constraints!(wm::WM.AbstractWaterModel, model::JuMP.Model, z, x, settings)
+function add_master_program_switch_constraints!(wm::WM.AbstractWaterModel, model::JuMP.Model, z, z_on, z_off, settings)
     network_ids = sort(unique([x.network_id for x in settings]))
     setting_vars = settings[1].variable_indices
 
-    # for nw in network_ids
-    #     for (pump_group_id, pump_group) in WM.ref(wm, nw, :pump_group)
-    #         pump_ids = sort(collect(pump_group["pump_indices"]))
-    #         pump_var_id_ids = [findfirst(x -> x.variable_symbol == :z_pump &&
-    #             x.component_index == i, setting_vars) for i in pump_ids]
-            
-    #          for i in 1:length(pump_var_id_ids) - 1
-    #             var_1 = z[nw][pump_var_id_ids[i]]
-    #             var_2 = z[nw][pump_var_id_ids[i+1]]
-    #             JuMP.@constraint(model, var_1 >= var_2)
-    #          end
-    #     end
-    # end
+    pump_ids = sort(collect(WM.ids(wm, network_ids[1], :pump)))
+    pump_var_id_ids = [findfirst(x -> x.variable_symbol == :z_pump &&
+        x.component_index == i, setting_vars) for i in pump_ids]
+
+    for pump_var_id_id in pump_var_id_ids
+        pump_var_id = settings[network_ids[1]].variable_indices[pump_var_id_id]
+        pump = WM.ref(wm, network_ids[1], :pump, pump_var_id.component_index)
+        z_sum = sum(z_on[n][pump_var_id_id] for n in network_ids[2:end])
+        c = JuMP.@constraint(model, z_sum <= pump["max_switches"])
+    end
+
+    n_1 = network_ids[1]
+
+    for n_2 in network_ids[2:end-1]
+        for pump_var_id_id in pump_var_id_ids
+            pump_var_id = settings[n_2].variable_indices[pump_var_id_id]
+            pump = WM.ref(wm, n_2, :pump, pump_var_id.component_index)
+
+            z_1, z_2 = z[n_1][pump_var_id_id], z[n_2][pump_var_id_id]
+            min_active_time = get(pump, "min_active_time", 3600.0)
+            min_inactive_time = get(pump, "min_inactive_time", 1800.0)
+
+            z_switch_on = z_on[n_2][pump_var_id_id]
+            nw_end = n_2 + Int(floor(min_active_time / WM.ref(wm, n_1, :time_step)))
+            nws_active = Vector{Int64}(collect(n_2:1:min(network_ids[end], nw_end)))
+            c_1 = JuMP.@constraint(model, z_switch_on >= z_2 - z_1)
+
+            for nw_active in nws_active
+                z_nw = z[nw_active][pump_var_id_id]
+                c_2 = JuMP.@constraint(model, z_switch_on <= z_nw)
+            end
+
+            z_switch_off = z_off[n_2][pump_var_id_id]
+            nw_end = n_2 + Int(floor(min_inactive_time / WM.ref(wm, n_1, :time_step)))
+            nws_active = Vector{Int64}(collect(n_2:1:min(network_ids[end], nw_end)))
+            c_1 = JuMP.@constraint(model, z_switch_off >= z_1 - z_2)
+
+            for nw_active in nws_active
+                z_nw = z[nw_active][pump_var_id_id]
+                c_2 = JuMP.@constraint(model, z_nw <= 1.0 - z_switch_off)
+            end
+         end
+
+        n_1 = n_2
+    end
 end
 
 
@@ -84,10 +124,12 @@ end
 
 function heuristic_master_program_objective!(model, z, Beta)
     network_indices = sort(collect(keys(z)))
-    cost_1 = sum(sum((Beta[n][i] - z[n][i])^2 for i in 1:length(z[n])) for n in network_indices)
-    cost_2 = sum((sum(Beta[n][i] for n in network_indices) -
-        sum(z[n][i] for n in network_indices))^2 for i in 1:length(z[1]))
-    return JuMP.@objective(model, WM._MOI.MIN_SENSE, cost_1 + cost_2)
+    cost_1 = sum([sum([(Beta[n][i] - z[n][i])^2 for i in 1:length(z[n])]) for n in network_indices])
+    cost_2 = sum([(sum([Beta[n][i] for n in network_indices]) -
+        sum([z[n][i] for n in network_indices]))^2 for i in 1:length(z[1])])
+    obj_var = JuMP.@variable(model, lower_bound = 0.0)
+    JuMP.@constraint(model, obj_var >= cost_1 + cost_2)
+    return JuMP.@objective(model, WM._MOI.MIN_SENSE, obj_var)
 end
 
 
@@ -201,12 +243,13 @@ function solve_heuristic_master_program(wm, network, settings, weights, optimize
     model, num_iterations = JuMP.Model(optimizer), 0
 
     z = heuristic_master_program_indicator_variables!(model, settings)
-    # x = heuristic_master_program_indicator_variables!(model, settings)
+    z_on = heuristic_master_program_switch_variables!(model, settings)
+    z_off = heuristic_master_program_switch_variables!(model, settings)
     delta = heuristic_master_program_delta_parameters(settings, weights)
     Beta = heuristic_master_program_beta_parameters(delta; randomize = false)
     objective = heuristic_master_program_objective!(model, z, Beta)
     add_master_program_symmetry_constraints!(wm, model, z, settings)
-    # add_master_program_switch_constraints!(wm, model, z, x, settings)
+    add_master_program_switch_constraints!(wm, model, z, z_on, z_off, settings)
     add_master_program_lazy_callback!(network, model, z, settings, nlp_optimizer)
 
     while num_iterations <= max_iterations
@@ -216,12 +259,13 @@ function solve_heuristic_master_program(wm, network, settings, weights, optimize
 
         model = JuMP.Model(optimizer)
         z = heuristic_master_program_indicator_variables!(model, settings)
-        # x = heuristic_master_program_indicator_variables!(model, settings)
+        z_on = heuristic_master_program_switch_variables!(model, settings)
+        z_off = heuristic_master_program_switch_variables!(model, settings)
         delta = heuristic_master_program_delta_parameters(settings, weights)
         Beta = heuristic_master_program_beta_parameters(delta; randomize = true)
         objective = heuristic_master_program_objective!(model, z, Beta)
         add_master_program_symmetry_constraints!(wm, model, z, settings)
-        # add_master_program_switch_constraints!(wm, model, z, x, settings)
+        add_master_program_switch_constraints!(wm, model, z, z_on, z_off, settings)
         add_master_program_lazy_callback!(network, model, z, settings, nlp_optimizer)
 
         num_iterations += 1

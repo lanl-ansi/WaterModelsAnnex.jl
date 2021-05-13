@@ -272,15 +272,16 @@ function _update_tank_time_series_heur!(data::Dict{String, <:Any}, result_mn::Di
         elev = [data["node"][string(tank["node"])]["elevation"] for n in nw_ids]
         head = [sol[string(n)]["node"][string(tank["node"])]["h"] for n in nw_ids]
         mid_level = 0.5 * (tank["min_level"] + tank["max_level"])
-        level_625 = 0.625 * (tank["min_level"] + tank["max_level"])
+        level_625 = 0.60 * (tank["min_level"] + tank["max_level"])
 
         # Store the tank's initial level data in the time series.
         data["time_series"]["tank"][i]["init_level"] = head .- elev
 
         for k in 2:length(data["time_series"]["tank"][i]["init_level"])
-            # if data["time_series"]["tank"][i]["init_level"][k] < mid_level
-                data["time_series"]["tank"][i]["init_level"][k] = mid_level
-            # end
+            data["time_series"]["tank"][i]["init_level"][k] = level_625
+            #if data["time_series"]["tank"][i]["init_level"][k] < level_625
+            #    data["time_series"]["tank"][i]["init_level"][k] = level_625
+            #end
         end
     end
 end
