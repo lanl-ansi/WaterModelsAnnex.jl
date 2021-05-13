@@ -26,6 +26,26 @@ function add_master_program_symmetry_constraints!(wm::WM.AbstractWaterModel, mod
 end
 
 
+function add_master_program_switch_constraints!(wm::WM.AbstractWaterModel, model::JuMP.Model, z, x, settings)
+    network_ids = sort(unique([x.network_id for x in settings]))
+    setting_vars = settings[1].variable_indices
+
+    # for nw in network_ids
+    #     for (pump_group_id, pump_group) in WM.ref(wm, nw, :pump_group)
+    #         pump_ids = sort(collect(pump_group["pump_indices"]))
+    #         pump_var_id_ids = [findfirst(x -> x.variable_symbol == :z_pump &&
+    #             x.component_index == i, setting_vars) for i in pump_ids]
+            
+    #          for i in 1:length(pump_var_id_ids) - 1
+    #             var_1 = z[nw][pump_var_id_ids[i]]
+    #             var_2 = z[nw][pump_var_id_ids[i+1]]
+    #             JuMP.@constraint(model, var_1 >= var_2)
+    #          end
+    #     end
+    # end
+end
+
+
 function heuristic_master_program_delta_parameters(settings, weights)
     network_ids = unique([x.network_id for x in settings])
     delta = Dict{Int, Any}(nw => zeros(length(settings[1].vals)) for nw in network_ids)
@@ -181,10 +201,12 @@ function solve_heuristic_master_program(wm, network, settings, weights, optimize
     model, num_iterations = JuMP.Model(optimizer), 0
 
     z = heuristic_master_program_indicator_variables!(model, settings)
+    # x = heuristic_master_program_indicator_variables!(model, settings)
     delta = heuristic_master_program_delta_parameters(settings, weights)
     Beta = heuristic_master_program_beta_parameters(delta; randomize = false)
     objective = heuristic_master_program_objective!(model, z, Beta)
     add_master_program_symmetry_constraints!(wm, model, z, settings)
+    # add_master_program_switch_constraints!(wm, model, z, x, settings)
     add_master_program_lazy_callback!(network, model, z, settings, nlp_optimizer)
 
     while num_iterations <= max_iterations
@@ -194,10 +216,12 @@ function solve_heuristic_master_program(wm, network, settings, weights, optimize
 
         model = JuMP.Model(optimizer)
         z = heuristic_master_program_indicator_variables!(model, settings)
+        # x = heuristic_master_program_indicator_variables!(model, settings)
         delta = heuristic_master_program_delta_parameters(settings, weights)
         Beta = heuristic_master_program_beta_parameters(delta; randomize = true)
         objective = heuristic_master_program_objective!(model, z, Beta)
         add_master_program_symmetry_constraints!(wm, model, z, settings)
+        # add_master_program_switch_constraints!(wm, model, z, x, settings)
         add_master_program_lazy_callback!(network, model, z, settings, nlp_optimizer)
 
         num_iterations += 1

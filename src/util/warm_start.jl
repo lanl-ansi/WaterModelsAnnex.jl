@@ -115,6 +115,28 @@ function set_warm_start_from_setting!(wm, network, settings, optimizer)
         total_cost += calc_simulation_cost(wm_sim)
     end
 
+    # Start with the first network, representing the initial time step.
+    network_ids = sort(collect(WM.nw_ids(wm)))
+    n_1 = network_ids[1]
+
+    # Constraints on pump switches.
+    for n_2 in network_ids[2:end-1]
+        # Constraints the define the pump switch variables.
+        for (a, pump) in WM.ref(wm, :pump; nw = n_1)
+            z_1_val = JuMP.start_value(WM.var(wm, n_1, :z_pump, a))
+            z_2_val = JuMP.start_value(WM.var(wm, n_2, :z_pump, a))
+
+            switch_on = max(0.0, z_2_val - z_1_val)
+            JuMP.set_start_value(WM.var(wm, n_2, :z_switch_on_pump, a), switch_on)
+
+            switch_off = max(0.0, z_1_val - z_2_val)
+            JuMP.set_start_value(WM.var(wm, n_2, :z_switch_off_pump, a), switch_off)
+        end
+
+        # Update the first network used for integration.
+        n_1 = n_2
+    end
+
     # Return the cost of the warm-started solution.
     return total_cost
 end
