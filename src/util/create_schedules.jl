@@ -3,7 +3,7 @@ import Random
 function get_controllable_variable_indices(wm::WM.AbstractWaterModel, n::Int)
     var_ids = Array{WM._VariableIndex, 1}([])
 
-    for comp_type in [:pump, :valve, :regulator]
+    for comp_type in [:des_pipe, :pump, :valve, :regulator]
         comp_ids = sort(collect(WM.ids(wm, n, comp_type)))
         var_sym = Symbol("z_" * String(comp_type))
         append!(var_ids, [WM._VariableIndex(n, comp_type, var_sym, i) for i in comp_ids])
@@ -80,7 +80,7 @@ function collect_arcs(wm::AbstractCQModel)::Array{Arc, 1}
     arcs = Array{Arc, 1}([])
 
     for symbol in [:des_pipe, :pipe, :pump, :regulator, :short_pipe, :valve]
-        append!(arcs, [Arc(symbol, i) for i in collect(WM.ids(wm, symbol))])
+        append!(arcs, [Arc(symbol, i) for i in sort(collect(WM.ids(wm, symbol)))])
     end
 
     return arcs
@@ -129,7 +129,8 @@ function build_right_hand_side(wm::AbstractCQModel)::Array{Float64, 1}
     end
 
     for (i, reservoir_id) in enumerate(reservoir_ids)
-        node = WM.ref(wm, :node, WM.ref(wm, :reservoir, reservoir_id)["node"])
+        node_id = WM.ref(wm, :reservoir, reservoir_id, "node")
+        node = WM.ref(wm, :node, node_id)
         vector[length(arcs) + i] = node["head_nominal"]
     end
 
@@ -214,8 +215,8 @@ function heads_are_feasible(wm::AbstractCQModel, heads::Array{Float64, 1})
     for (row_index, node_id) in enumerate(sort(collect(WM.ids(wm, :node))))
         head_min = WM.ref(wm, :node, node_id, "head_min")
         head_max = WM.ref(wm, :node, node_id, "head_max")
-        head_min_satisfied = heads[row_index] >= head_min - 1.0e-6
-        head_max_satisfied = heads[row_index] <= head_max + 1.0e-6
+        head_min_satisfied = heads[row_index] >= head_min - 1.0e-4
+        head_max_satisfied = heads[row_index] <= head_max + 1.0e-4
 
         if !(head_min_satisfied && head_max_satisfied)
             return false

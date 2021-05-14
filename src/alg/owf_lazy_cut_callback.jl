@@ -230,7 +230,7 @@ function add_objective_cut!(wm::WM.AbstractWaterModel, cb_data, objective_value:
 end
 
 
-function update_master_setting_at_nw!(wm_master, wm_sim, setting, cb_data, nw)
+function update_master_setting_at_nw!(wm_master, setting, cb_data, nw)
     setting.network_id = nw
 
     for (i, var_id) in enumerate(setting.variable_indices)
@@ -242,11 +242,11 @@ end
 
 
 function simulate_master_solution(wm_master, wm_sim, setting, cb_data)
-    network_ids = sort(collect(WM.nw_ids(wm_master)))[1:end-1]
     total_cost = 0.0
+    network_ids = sort(collect(WM.nw_ids(wm_master)))
 
-    for nw in network_ids
-        update_master_setting_at_nw!(wm_master, wm_sim, setting, cb_data, nw)
+    for nw in network_ids[1:end-1]
+        update_master_setting_at_nw!(wm_master, setting, cb_data, nw)
         result = simulate_control_setting(wm_sim, setting)
         !result.feasible && return 0.0, nw
         update_tank_time_series(wm_sim.data, result, nw)
@@ -254,7 +254,7 @@ function simulate_master_solution(wm_master, wm_sim, setting, cb_data)
     end
 
     if !tank_levels_recovered(wm_sim.data)
-        return total_cost, network_ids[end] + 1
+        return total_cost, network_ids[end]
     else
         return total_cost, nothing
     end
@@ -270,10 +270,13 @@ function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, setting, 
             simulate_master_solution(wm, wm_sim, setting, cb_data)
 
         if infeasible_nw == network_ids[end] + 1
+            # WM.Memento.info(LOGGER, "Infeasible solution found at step $(infeasible_nw).")
             stats.time_elapsed += @elapsed add_recovery_feasibility_cut!(wm, cb_data)
         elseif infeasible_nw !== nothing
+            # WM.Memento.info(LOGGER, "Infeasible solution found at step $(infeasible_nw).")
             stats.time_elapsed += @elapsed add_feasibility_cut!(wm, cb_data, infeasible_nw)
         else
+            WM.Memento.info(LOGGER, "Found feasible with cost $(cost).")
             # stats.time_elapsed += @elapsed add_objective_cut!(wm, cb_data, cost)
         end
 

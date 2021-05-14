@@ -208,5 +208,10 @@ function calc_heuristic(wm::WM.AbstractWaterModel, network::Dict{String, <:Any},
     WM.Memento.info(LOGGER, "Solving heuristic master mixed-integer program.")
     control_sol = solve_heuristic_master_program(wm, network, settings, weights, mip_optimizer, nlp_optimizer)
 
-    return control_settings_from_solution(control_sol, settings)
+    if control_sol !== nothing
+        return control_settings_from_solution(control_sol, settings)
+    else
+        network_ids = sort(unique([x.network_id for x in settings]))
+        return [deepcopy(settings[1]) for i in 1:length(network_ids)]
+    end
 end
