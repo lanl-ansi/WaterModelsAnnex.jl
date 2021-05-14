@@ -215,8 +215,8 @@ function heads_are_feasible(wm::AbstractCQModel, heads::Array{Float64, 1})
     for (row_index, node_id) in enumerate(sort(collect(WM.ids(wm, :node))))
         head_min = WM.ref(wm, :node, node_id, "head_min")
         head_max = WM.ref(wm, :node, node_id, "head_max")
-        head_min_satisfied = heads[row_index] >= head_min - 1.0e-4
-        head_max_satisfied = heads[row_index] <= head_max + 1.0e-4
+        head_min_satisfied = heads[row_index] >= head_min - 1.0e-6
+        head_max_satisfied = heads[row_index] <= head_max + 1.0e-6
 
         if !(head_min_satisfied && head_max_satisfied)
             return false
