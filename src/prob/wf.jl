@@ -364,7 +364,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         # Flow conservation at all nodes.
         for (i, node) in WM.ref(wm, :node; nw=n)
             WM.constraint_flow_conservation(wm, i; nw=n)
-            # WM.constraint_node_directionality(wm, i; nw=n)
+            WM.constraint_node_directionality(wm, i; nw=n)
         end
 
         # Constraints on pipe flows, heads, and physics.
