@@ -92,8 +92,8 @@ function construct_owf_model(network::Dict{String, Any}, owf_optimizer; use_new:
     network_mn = WM.make_multinetwork(network)
 
     # Specify model options and construct the multinetwork OWF model.
-    ext = Dict(:pipe_breakpoints => 2, :pump_breakpoints => 2)
-    model_type = WM.LRDWaterModel #use_new ? LRDXWaterModel : WM.LRDWaterModel
+    ext = Dict(:pipe_breakpoints => 3, :pump_breakpoints => 3)
+    model_type = WM.PWLRDWaterModel #use_new ? LRDXWaterModel : WM.LRDWaterModel
     wm = WM.instantiate_model(network_mn, model_type, WM.build_mn_owf; ext = ext)
 
     # Set the optimizer and other important solver parameters.
@@ -155,7 +155,7 @@ function solve_owf(network_path::String, network, obbt_optimizer, owf_optimizer,
 
     # Optimize the master WaterModels model.
     WM.Memento.info(LOGGER, "Solving the master OWF problem.")
-    # WM._relax_all_direction_variables!(wm_master)
+    WM._relax_all_direction_variables!(wm_master)
     result = WM.optimize_model!(wm_master; relax_integrality = false)
     WM.Memento.info(LOGGER, "Solved for $(result["solve_time"]) seconds.")
 
