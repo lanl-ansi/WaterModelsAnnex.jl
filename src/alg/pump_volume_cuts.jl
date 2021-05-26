@@ -49,7 +49,7 @@ function add_pump_volume_cuts!(wm::WM.AbstractWaterModel)
         reservoir_volume = _sum_remaining_reservoir_flows(wm, nws_remaining)
 
         tank_volume = (sum(WM.var(wm, n, :V)) - sum(WM.var(wm, nws_remaining[end] + 1, :V))) / time_step
-        c = WM.JuMP.@constraint(wm.model, demand_volume - tank_volume == pump_volume)
+        c = WM.JuMP.@constraint(wm.model, demand_volume - tank_volume == reservoir_volume)
         tank_volume = (sum(WM.var(wm, n_1, :V)) - sum(WM.var(wm, n, :V))) / time_step
         c = WM.JuMP.@constraint(wm.model, demand_volume + tank_volume <= pump_volume)
     end

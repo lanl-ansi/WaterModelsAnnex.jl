@@ -242,6 +242,11 @@ end
 function check_simulation_feasibility(wm::AbstractCQModel)::Bool
     solved = JuMP.termination_status(wm.model) === WM._MOI.LOCALLY_SOLVED
     almost_solved = JuMP.termination_status(wm.model) === WM._MOI.ALMOST_LOCALLY_SOLVED
+
+    # if !(solved || almost_solved)
+    #     println(JuMP.termination_status(wm.model))
+    # end
+    
     return solved || almost_solved ? check_physical_feasibility(wm) : false
 end
 

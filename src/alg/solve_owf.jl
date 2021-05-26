@@ -93,7 +93,7 @@ function construct_owf_model(network::Dict{String, Any}, owf_optimizer; use_new:
 
     # Specify model options and construct the multinetwork OWF model.
     ext = Dict(:pipe_breakpoints => 3, :pump_breakpoints => 3)
-    model_type = WM.PWLRDWaterModel #use_new ? LRDXWaterModel : WM.LRDWaterModel
+    model_type = WM.PWLRDWaterModel #use_new ? WM.PWLRDWaterModel : WM.LRDWaterModel # ? LRDXWaterModel : WM.LRDWaterModel
     wm = WM.instantiate_model(network_mn, model_type, WM.build_mn_owf; ext = ext)
 
     # Set the optimizer and other important solver parameters.
@@ -195,6 +195,9 @@ function calc_heuristic(wm::WM.AbstractWaterModel, network::Dict{String, <:Any},
     # Build all possible control settings, simulate them, and filter the results.
     WM.Memento.info(LOGGER, "Precomputing all possible heuristic control settings.")
     settings = create_all_control_settings(wm)
+
+    # network_ids = sort(unique([x.network_id for x in settings]))
+    # return [deepcopy(settings[1]) for i in 1:length(network_ids)]
 
     WM.Memento.info(LOGGER, "Simulating all heuristic control settings.")
     results = simulate_control_settings(network, settings, nlp_optimizer)

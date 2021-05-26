@@ -41,6 +41,7 @@ include("prob/owfh.jl")
 
 include("alg/dantzig_wolfe.jl")
 include("alg/simulate.jl")
+include("alg/heuristic_relaxed_milp.jl")
 include("alg/owf_lazy_cut_callback.jl")
 include("alg/owf_user_cut_callback.jl")
 include("alg/owf_heuristic_callback.jl")
