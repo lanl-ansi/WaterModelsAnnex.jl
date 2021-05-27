@@ -38,7 +38,7 @@ function compute_heuristic_schedule(network::Dict{String, Any}, mip_solver; use_
     network_mn = WM.make_multinetwork(network)
 
     # Specify model options and construct the multinetwork OWF model.
-    ext = Dict(:pipe_breakpoints => 5, :pump_breakpoints => 5)
+    ext = Dict(:pipe_breakpoints => 4, :pump_breakpoints => 4)
     wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf; ext = ext)
 
     # Set the optimizer and other important solver parameters.
