@@ -1,26 +1,6 @@
-function build_nw_id_partition(wm::WM.AbstractWaterModel)
-    return Random.shuffle([[x] for x in sort(collect(WM.nw_ids(wm)))[1:end-1]])
-
+function build_nw_id_partition(wm::WM.AbstractWaterModel; use_partition::Bool = false)
     nw_ids = [x for x in sort(collect(WM.nw_ids(wm)))[1:end-1]]
-    nw_ids_relax, nw_mid = [], Int(nw_ids[Int(length(nw_ids) / 2)])
-
-    for i in 1:Int(floor(length(nw_ids) / 2))
-        nw_1, nw_2 = nw_ids[i], nw_ids[end-i+1]
-        array_append = nw_1 != nw_2 ? [nw_1, nw_2] : [nw_1]
-        push!(nw_ids_relax, array_append)
-    end
-
-    nw_ids_final = deepcopy(nw_ids_relax)
-
-    for i in 1:Int(floor(length(nw_ids_relax) / 2))
-        nw_ids_final[2*(i-1)+1] = nw_ids_relax[i]
-        nw_ids_final[2*(i-1)+2] = nw_ids_relax[end-i+1]
-    end
-
-    # return nw_ids_final
-
-    # return [[x] for x in vcat(nw_ids_final...)]
-    return Random.shuffle([[x] for x in vcat(nw_ids_final...)])
+    return Random.shuffle([[x] for x in nw_ids])
 end
 
 
@@ -54,7 +34,7 @@ function create_control_settings_from_result(result::Dict{String, <:Any})
 end
 
 
-function compute_heuristic_schedule(network::Dict{String, Any}, mip_solver)
+function compute_heuristic_schedule(network::Dict{String, Any}, mip_solver; use_partition::Bool = false)
     network_mn = WM.make_multinetwork(network)
 
     # Specify model options and construct the multinetwork OWF model.
@@ -64,26 +44,40 @@ function compute_heuristic_schedule(network::Dict{String, Any}, mip_solver)
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, mip_solver)
     nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
-    partitions = build_nw_id_partition(wm)
+    
+    for nw_partition in build_nw_id_partition(wm)
+        nws_before = max.(nw_ids[1], nw_partition .- [1, 2, 3])
+        nws_after = min.(nw_ids[end], nw_partition .+ [1, 2, 3])
 
-    num_partitions = Int(floor(0.5 * length(partitions)))
+        vars_before = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nws_before)...)
+        filter(v -> occursin("_x", JuMP.name(v)) || occursin("_y", JuMP.name(v)), vars_before)
 
-    for nw_partition in build_nw_id_partition(wm)[1:num_partitions]
+        vars_after = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nws_after)...)
+        filter(v -> occursin("_x", JuMP.name(v)) || occursin("_y", JuMP.name(v)), vars_after)
+
+        vars_current = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nw_partition)...)
         nws_to_relax = sort(collect(setdiff(Set(nw_ids), Set(nw_partition))))
-        vars_unset = vcat(WM.relax_all_binary_variables_at_nw!.(Ref(wm), nws_to_relax)...)
+
+        vars_to_relax = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nws_to_relax)...)
+        # vars_to_relax = filter(v -> !occursin("_y", JuMP.name(v)), vars_to_relax)
+        # vars_to_relax = filter(v -> !occursin("_x", JuMP.name(v)), vars_to_relax)
+
+        map(x -> JuMP.unset_binary(x), vars_to_relax)
+        WM.set_binary_variables!(vars_before)
+        WM.set_binary_variables!(vars_after)
+
         JuMP.optimize!(wm.model) # Solve the relaxed model.
 
         if JuMP.primal_status(wm.model) !== WM._MOI.FEASIBLE_POINT
             return nothing
         end
 
-        binary_vars = filter(v -> JuMP.is_binary(v), JuMP.all_variables(wm.model))
+        binary_vars = filter(v -> JuMP.is_binary(v), vars_current)
         binary_vars_ny = filter(v -> !occursin("_x", JuMP.name(v)), binary_vars)
-        # binary_vars_nxy = filter(v -> !occursin("_y", JuMP.name(v)), binary_vars_ny)
+        binary_vars_nyx = filter(v -> !occursin("_y", JuMP.name(v)), binary_vars_ny)
         
-        # set_heads_at_tanks_nws(wm, nw_partition .+ 1)
-        JuMP.fix.(binary_vars_ny, JuMP.value.(binary_vars_ny))
-        WM.set_binary_variables!(vars_unset)
+        JuMP.fix.(binary_vars_nyx, JuMP.value.(binary_vars_nyx))
+        WM.set_binary_variables!(vars_to_relax)
     end
 
     result = WM.optimize_model!(wm)
@@ -104,7 +98,7 @@ function run_heuristic(network::Dict{String, Any}, mip_optimizer, nlp_optimizer)
     feasible, costs = [false for n in 1:Threads.nthreads()], zeros(Float64, Threads.nthreads())
     
     Threads.@threads for k in 1:Threads.nthreads()
-        heuristic_result = compute_heuristic_schedule(networks[k], mip_optimizer)
+        heuristic_result = compute_heuristic_schedule(networks[k], mip_optimizer; use_partition = k == 1)
         settings[k] = heuristic_result !== nothing ? heuristic_result : settings[k]
         results[k] = heuristic_result !== nothing ? simulate_control_setting.(Ref(wms[k]), settings[k]) : results[k]
         feasible[k] = heuristic_result !== nothing ? all(x.feasible for x in results[k]) : feasible[k]
