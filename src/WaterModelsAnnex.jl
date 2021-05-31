@@ -2,6 +2,7 @@ module WaterModelsAnnex
 
 import BlockDecomposition
 import Coluna
+import Gurobi
 import JuMP
 import WaterModels
 import LightGraphs
