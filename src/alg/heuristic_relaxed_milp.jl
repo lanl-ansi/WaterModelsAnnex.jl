@@ -127,9 +127,6 @@ function run_heuristic(network::Dict{String, Any}, mip_optimizer, nlp_optimizer)
         costs[k] = is_feasible ? heuristic_result[k]["objective"] : Inf
     end
 
-    println(minimum(costs), " ", costs)
-    # feasible_ids = findall(x -> x == true, feasible)
-    # println(minimum(costs[feasible_ids]), " ", costs[feasible_ids])
-
-    # return feasible, costs
+    println("Heuristic solution costs: ", minimum(costs), " ", costs)
+    return heuristic_result[findmin(costs)[2]]
 end
