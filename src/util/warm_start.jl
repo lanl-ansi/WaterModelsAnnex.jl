@@ -108,8 +108,8 @@ function set_warm_start_from_setting!(wm, network, settings, optimizer)
             q = JuMP.start_value(WM.var(wm, nw, :qp_pump, i))
             z = JuMP.start_value(WM.var(wm, nw, :z_pump, i))
             P = pump["power_fixed"] * z + pump["power_per_unit_flow"] * q
-            Ps = P / (WM._DENSITY * WM._GRAVITY)
-            JuMP.set_start_value(WM.var(wm, nw, :Ps_pump, i), Ps)
+            # Ps = P / (WM._DENSITY * WM._GRAVITY)
+            # JuMP.set_start_value(WM.var(wm, nw, :Ps_pump, i), Ps)
         end
 
         total_cost += calc_simulation_cost(wm_sim)

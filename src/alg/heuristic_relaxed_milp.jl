@@ -45,12 +45,45 @@ function feasibility_pump(wm::WM.AbstractWaterModel)
 
     #  JuMP.@constraint(wm.model, objective <= 3.0)
      JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
-     result = WM.optimize_model!(wm)
-     return result
+     return WM.optimize_model!(wm)
 end
 
 
-function compute_heuristic_schedule(network_mn::Dict{String, Any}, mip_solver; use_partition::Bool = false)
+function feasibility_pump_at_nw(wm::WM.AbstractWaterModel, nw_partition::Array{Int64, 1}, nws_fixed::Vector{Array{Int64, 1}})
+    nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
+
+    for nws_variable_counter in 1:min(length(nws_fixed), 3)
+        nw_ids_current = reverse(nws_fixed)[1:nws_variable_counter]
+        nw_ids_before = max.(nw_ids[1], nw_partition .- [1])
+        nw_ids_after = min.(nw_ids[end], nw_partition .+ [1])
+        nw_ids_variable = vcat(nw_ids_current..., nw_ids_before..., nw_ids_after...)
+
+        # Relax variables not considered in the binary variable set.
+        nw_ids_relaxed = sort(collect(setdiff(Set(nw_ids), Set(nw_ids_variable))))
+        vars_to_relax = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nw_ids_relaxed)...)
+        map(x -> JuMP.unset_binary(x), vars_to_relax)
+
+        # Ensure variables that are being decided are not fixed.
+        vars_discrete = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nw_ids_variable)...)
+        map(x -> JuMP.is_fixed(x) && JuMP.unfix(x), vars_discrete)
+        map(x -> JuMP.set_binary(x), vars_discrete)
+        JuMP.optimize!(wm.model) # Solve the relaxed model.
+            
+        if JuMP.primal_status(wm.model) === WM._MOI.FEASIBLE_POINT
+            binary_vars = filter(v -> JuMP.is_binary(v), vars_discrete)
+            JuMP.fix.(binary_vars, JuMP.value.(binary_vars))
+            WM.set_binary_variables!(vars_to_relax)
+            return true # Found a feasible solution.
+        else
+            WM.set_binary_variables!(vars_to_relax)
+        end
+    end
+
+    return false # Did not find a feasible solution.
+end
+
+
+function run_feasibility_pump(network_mn::Dict{String, Any}, mip_solver)
     # Specify model options and construct the multinetwork OWF model.
     wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf)
 
@@ -59,48 +92,14 @@ function compute_heuristic_schedule(network_mn::Dict{String, Any}, mip_solver; u
     nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
     nw_partitions = build_nw_id_partition(wm)
     
-    for nw_partition in nw_partitions
-        nws_before = max.(nw_ids[1], nw_partition .- [1])
-        nws_after = min.(nw_ids[end], nw_partition .+ [1])
-
-        vars_before = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nws_before)...)
-        vars_after = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nws_after)...)
-
-        vars_current = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nw_partition)...)
-        nws_to_relax = sort(collect(setdiff(Set(nw_ids), Set(nw_partition))))
-        vars_to_relax = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nws_to_relax)...)
-
-        map(x -> JuMP.unset_binary(x), vars_to_relax)
-        WM.set_binary_variables!(vars_before)
-        WM.set_binary_variables!(vars_after)
-
-        JuMP.optimize!(wm.model) # Solve the relaxed model.
-
-        if JuMP.primal_status(wm.model) !== WM._MOI.FEASIBLE_POINT
+    for (i, nw_partition) in enumerate(nw_partitions)
+        # Ensure a feasible solution exists for nw_partitions[1:i].
+        if !feasibility_pump_at_nw(wm, nw_partition, nw_partitions[1:i])
             return nothing
         end
-
-        binary_vars = filter(v -> JuMP.is_binary(v), vars_current)
-        binary_vars_ny = filter(v -> !occursin("_x", JuMP.name(v)), binary_vars)
-        binary_vars_nyx = filter(v -> !occursin("_y", JuMP.name(v)), binary_vars_ny)
-
-        JuMP.fix.(binary_vars_nyx, JuMP.value.(binary_vars_nyx))
-        WM.set_binary_variables!(vars_to_relax)
     end
 
-    if JuMP.primal_status(wm.model) === WM._MOI.FEASIBLE_POINT
-        result = feasibility_pump(wm)
-    else
-        result = WM.optimize_model!(wm)
-    end
-
-    if JuMP.primal_status(wm.model) === WM._MOI.FEASIBLE_POINT
-        return get_control_settings_from_result(result)
-    else
-        return nothing
-    end
-
-    return nothing
+    return WM.optimize_model!(wm)
 end
 
 
@@ -112,22 +111,25 @@ function run_heuristic(network::Dict{String, Any}, mip_optimizer, nlp_optimizer)
     networks_mn = [deepcopy(network_mn) for i in 1:Threads.nthreads()]
 
     networks = [deepcopy(network) for i in 1:Threads.nthreads()]
+    heuristic_result = Vector{Any}([nothing for i in 1:Threads.nthreads()])
     wms = [_instantiate_cq_model(networks[i], nlp_optimizer) for i in 1:Threads.nthreads()]
     settings = [[ControlSetting(n, [], [])] for n in 1:Threads.nthreads()]
     results = [[SimulationResult(false, Dict{Int, Float64}(), 0.0)] for n in 1:Threads.nthreads()]
     feasible, costs = [false for n in 1:Threads.nthreads()], zeros(Float64, Threads.nthreads())
     
     Threads.@threads for k in 1:Threads.nthreads()
-        heuristic_result = compute_heuristic_schedule(networks_mn[k], mip_optimizer; use_partition = k == 1)
-        settings[k] = heuristic_result !== nothing ? heuristic_result : settings[k]
-        results[k] = heuristic_result !== nothing ? simulate_control_setting.(Ref(wms[k]), settings[k]) : results[k]
-        feasible[k] = heuristic_result !== nothing ? all(x.feasible for x in results[k]) : feasible[k]
-        costs[k] = heuristic_result !== nothing ? sum(x.cost for x in results[k]) : Inf
+        heuristic_result[k] = run_feasibility_pump(networks_mn[k], mip_optimizer)
+        is_feasible = heuristic_result[k] === nothing ? false : heuristic_result[k]["primal_status"] === WM._MOI.FEASIBLE_POINT
+        settings[k] = is_feasible ? get_control_settings_from_result(heuristic_result[k]) : settings[k]
+        results[k] = is_feasible ? simulate_control_setting.(Ref(wms[k]), settings[k]) : results[k]
+        feasible[k] = is_feasible ? all(x.feasible for x in results[k]) : feasible[k]
+        # costs[k] = is_feasible ? sum(x.cost for x in results[k]) : Inf
+        costs[k] = is_feasible ? heuristic_result[k]["objective"] : Inf
     end
 
     println(minimum(costs), " ", costs)
-    #feasible_ids = findall(x -> x == true, feasible)
-    #println(minimum(costs[feasible_ids]), " ", costs[feasible_ids])
+    # feasible_ids = findall(x -> x == true, feasible)
+    # println(minimum(costs[feasible_ids]), " ", costs[feasible_ids])
 
     # return feasible, costs
 end
