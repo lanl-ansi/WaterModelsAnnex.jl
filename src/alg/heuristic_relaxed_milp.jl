@@ -51,31 +51,35 @@ end
 
 function feasibility_pump_at_nw(wm::WM.AbstractWaterModel, nw_partition::Array{Int64, 1}, nws_fixed::Vector{Array{Int64, 1}})
     nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
+    nws_fixed_var = vcat(nws_fixed[end]...,
+        collect(Random.shuffle(nws_fixed[1:end-1]))...)
 
-    for nws_variable_counter in 1:min(length(nws_fixed), 3)
-        nw_ids_current = reverse(nws_fixed)[1:nws_variable_counter]
-        nw_ids_before = max.(nw_ids[1], nw_partition .- [1])
-        nw_ids_after = min.(nw_ids[end], nw_partition .+ [1])
+    for nws_variable_counter in 1:min(length(nws_fixed_var), 3)
+        nw_ids_current = nws_fixed_var[1:nws_variable_counter]
+        nw_ids_before = max.(nw_ids[1], nw_ids_current .- [1])
+        nw_ids_after = min.(nw_ids[end], nw_ids_current .+ [1])
         nw_ids_variable = vcat(nw_ids_current..., nw_ids_before..., nw_ids_after...)
 
         # Relax variables not considered in the binary variable set.
         nw_ids_relaxed = sort(collect(setdiff(Set(nw_ids), Set(nw_ids_variable))))
         vars_to_relax = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nw_ids_relaxed)...)
-        map(x -> JuMP.unset_binary(x), vars_to_relax)
+        map(x -> !JuMP.is_fixed(x) && JuMP.unset_binary(x), vars_to_relax)
 
         # Ensure variables that are being decided are not fixed.
         vars_discrete = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nw_ids_variable)...)
         map(x -> JuMP.is_fixed(x) && JuMP.unfix(x), vars_discrete)
-        map(x -> JuMP.set_binary(x), vars_discrete)
+        map(x -> !JuMP.is_binary(x) && JuMP.set_binary(x), vars_discrete)
         JuMP.optimize!(wm.model) # Solve the relaxed model.
-            
+
         if JuMP.primal_status(wm.model) === WM._MOI.FEASIBLE_POINT
             binary_vars = filter(v -> JuMP.is_binary(v), vars_discrete)
-            JuMP.fix.(binary_vars, JuMP.value.(binary_vars))
-            WM.set_binary_variables!(vars_to_relax)
+            binary_vars_nx = filter(v -> !occursin("_x", JuMP.name(v)), binary_vars)
+            binary_vars_nxy = filter(v -> !occursin("_y", JuMP.name(v)), binary_vars)
+            JuMP.fix.(binary_vars_nxy, JuMP.value.(binary_vars_nxy))
+            map(x -> JuMP.set_binary(x), vars_to_relax)
             return true # Found a feasible solution.
         else
-            WM.set_binary_variables!(vars_to_relax)
+            map(x -> JuMP.set_binary(x), vars_to_relax)
         end
     end
 
@@ -89,17 +93,22 @@ function run_feasibility_pump(network_mn::Dict{String, Any}, mip_solver)
 
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, mip_solver)
-    nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
     nw_partitions = build_nw_id_partition(wm)
+    feasible = false
     
     for (i, nw_partition) in enumerate(nw_partitions)
-        # Ensure a feasible solution exists for nw_partitions[1:i].
-        if !feasibility_pump_at_nw(wm, nw_partition, nw_partitions[1:i])
-            return nothing
+        feasible = false
+        num_iterations = 0
+
+        while !feasible && num_iterations <= 5
+            feasible = feasibility_pump_at_nw(wm, nw_partition, nw_partitions[1:i])
+            num_iterations += 1
         end
+
+        !feasible && break
     end
 
-    return WM.optimize_model!(wm)
+    return feasible ? WM.optimize_model!(wm) : nothing
 end
 
 
