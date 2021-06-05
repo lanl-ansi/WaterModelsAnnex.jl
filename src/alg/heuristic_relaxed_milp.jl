@@ -73,9 +73,9 @@ function feasibility_pump_at_nw(wm::WM.AbstractWaterModel, nw_partition::Array{I
 
         if JuMP.primal_status(wm.model) === WM._MOI.FEASIBLE_POINT
             binary_vars = filter(v -> JuMP.is_binary(v), vars_discrete)
-            binary_vars_nx = filter(v -> !occursin("_x", JuMP.name(v)), binary_vars)
-            binary_vars_nxy = filter(v -> !occursin("_y", JuMP.name(v)), binary_vars)
-            JuMP.fix.(binary_vars_nxy, JuMP.value.(binary_vars_nxy))
+            binary_vars_nx = filter(v -> !occursin("_x_pw_pump", JuMP.name(v)), binary_vars)
+            binary_vars_nxy = filter(v -> !occursin("_y", JuMP.name(v)), binary_vars_nx)
+            JuMP.fix.(binary_vars, JuMP.value.(binary_vars))
             map(x -> JuMP.set_binary(x), vars_to_relax)
             return true # Found a feasible solution.
         else
@@ -108,6 +108,9 @@ function run_feasibility_pump(network_mn::Dict{String, Any}, mip_solver)
         !feasible && break
     end
 
+    binary_vars = filter(v -> JuMP.is_binary(v), JuMP.all_variables(wm.model))
+    vars_to_unfix = filter(v -> occursin("_x", JuMP.name(v)), binary_vars)
+    map(v -> JuMP.is_fixed(v) && JuMP.unfix(v), vars_to_unfix)
     return feasible ? WM.optimize_model!(wm) : nothing
 end
 

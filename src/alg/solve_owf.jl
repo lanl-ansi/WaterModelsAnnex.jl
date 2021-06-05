@@ -85,6 +85,8 @@ function degree_fr(data::Dict{String, <:Any}, component::Dict{String, <:Any})
     short_pipes_fr = filter(x -> x.second["node_fr"] == node_fr, data["short_pipe"])
     valves_fr = filter(x -> x.second["node_fr"] == node_fr, data["valve"])
 
+    # return length(pipes_fr) + length(short_pipes_fr)
+
     return length(pipes_fr) + length(pumps_fr) + length(regulators_fr) +
         length(short_pipes_fr) + length(valves_fr)
 end
@@ -98,6 +100,8 @@ function degree_to(data::Dict{String, <:Any}, component::Dict{String, <:Any})
     regulators_to = filter(x -> x.second["node_to"] == node_to, data["regulator"])
     short_pipes_to = filter(x -> x.second["node_to"] == node_to, data["short_pipe"])
     valves_to = filter(x -> x.second["node_to"] == node_to, data["valve"])
+
+    # return length(pipes_to) + length(short_pipes_to)
 
     return length(pipes_to) + length(pumps_to) + length(regulators_to) +
         length(short_pipes_to) + length(valves_to)
@@ -178,7 +182,7 @@ function update_multinetwork_heuristic_breakpoints!(network_mn::Dict{String, <:A
             flow_result = max(0.0, result["pump"][i]["q"])
             flow_min, flow_max = pump["flow_min_forward"], pump["flow_max"]
 
-            if flow_result != 0.0
+            if flow_result > 1.0e-4
                 flow_min_mid = flow_min + 0.5 * (flow_result - flow_min)
                 flow_max_mid = flow_result + 0.5 * (flow_max - flow_result)
                 pump["flow_lower_breakpoints"] = [flow_min, flow_min_mid, flow_result, flow_max_mid, flow_max]
