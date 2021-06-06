@@ -76,129 +76,6 @@ function add_pairwise_cuts(wm::WM.AbstractWaterModel, cuts::Array{WM._PairwiseCu
 end
 
 
-function degree_fr(data::Dict{String, <:Any}, component::Dict{String, <:Any})
-    node_fr = component["node_fr"]
-
-    pipes_fr = filter(x -> x.second["node_fr"] == node_fr, data["pipe"])
-    pumps_fr = filter(x -> x.second["node_fr"] == node_fr, data["pump"])
-    regulators_fr = filter(x -> x.second["node_fr"] == node_fr, data["regulator"])
-    short_pipes_fr = filter(x -> x.second["node_fr"] == node_fr, data["short_pipe"])
-    valves_fr = filter(x -> x.second["node_fr"] == node_fr, data["valve"])
-
-    # return length(pipes_fr) + length(short_pipes_fr)
-
-    return length(pipes_fr) + length(pumps_fr) + length(regulators_fr) +
-        length(short_pipes_fr) + length(valves_fr)
-end
-
-
-function degree_to(data::Dict{String, <:Any}, component::Dict{String, <:Any})
-    node_to = component["node_to"]
-
-    pipes_to = filter(x -> x.second["node_to"] == node_to, data["pipe"])
-    pumps_to = filter(x -> x.second["node_to"] == node_to, data["pump"])
-    regulators_to = filter(x -> x.second["node_to"] == node_to, data["regulator"])
-    short_pipes_to = filter(x -> x.second["node_to"] == node_to, data["short_pipe"])
-    valves_to = filter(x -> x.second["node_to"] == node_to, data["valve"])
-
-    # return length(pipes_to) + length(short_pipes_to)
-
-    return length(pipes_to) + length(pumps_to) + length(regulators_to) +
-        length(short_pipes_to) + length(valves_to)
-end
-
-
-function update_multinetwork_breakpoints!(network_mn::Dict{String, <:Any}, result_mn::Dict{String, <:Any})
-    for nw_id in sort([parse(Int, x) for x in collect(keys(network_mn["nw"]))])[1:end-1]
-        network = network_mn["nw"][string(nw_id)]
-        result = result_mn["solution"]["nw"][string(nw_id)]
-
-        for (i, pipe) in network["pipe"]
-            flow_result = result["pipe"][i]["q"]
-            flow_min, flow_max = pipe["flow_min"], pipe["flow_max"]
-            
-            pipe["flow_lower_breakpoints"] = range(flow_min, stop = flow_max, length = 10)
-            pipe["flow_upper_breakpoints"] = range(flow_min, stop = flow_max, length = 10)
-
-            # pipe["flow_lower_breakpoints"] = range(flow_min, stop = flow_max, 10)
-            # pipe["flow_upper_breakpoints"] = range(flow_min, stop = flow_max, 10)
-
-            if degree_fr(network, pipe) + degree_to(network, pipe) <= 2
-                pipe["flow_lower_breakpoints"] = [flow_min, flow_result, flow_max]
-                pipe["flow_upper_breakpoints"] = [flow_min, flow_result, flow_max]
-            else
-                pipe["flow_lower_breakpoints"] = [flow_min, flow_max]
-                pipe["flow_upper_breakpoints"] = [flow_min, flow_max]
-            end
-         end
-
-         for (i, pump) in network["pump"]
-            flow_result = max(0.0, result["pump"][i]["q"])
-            flow_min, flow_max = pump["flow_min"], pump["flow_max"]
-
-            # pump["flow_lower_breakpoints"] = range(flow_min, stop = flow_max, length = 5)
-            # pump["flow_upper_breakpoints"] = range(flow_min, stop = flow_max, length = 5)
-
-            # pipe["flow_lower_breakpoints"] = range(flow_min, stop = flow_max, 10)
-            # pipe["flow_upper_breakpoints"] = range(flow_min, stop = flow_max, 10)
-
-            if flow_result != 0.0
-                pump["flow_lower_breakpoints"] = [flow_min, flow_result, flow_max]
-                pump["flow_upper_breakpoints"] = [flow_min, flow_result, flow_max]
-            else
-                flow_mid = flow_min + 0.5 * (flow_max - flow_min)
-                pump["flow_lower_breakpoints"] = [flow_min, flow_mid, flow_max]
-                pump["flow_upper_breakpoints"] = [flow_min, flow_mid, flow_max]
-            end
-         end
-    end
-end
-
-
-function update_multinetwork_heuristic_breakpoints!(network_mn::Dict{String, <:Any}, result_mn::Dict{String, <:Any})
-    for nw_id in sort([parse(Int, x) for x in collect(keys(network_mn["nw"]))])[1:end-1]
-        network = network_mn["nw"][string(nw_id)]
-        result = result_mn["solution"]["nw"][string(nw_id)]
-
-        for (i, pipe) in network["pipe"]
-            flow_result = result["pipe"][i]["q"]
-            flow_min, flow_max = pipe["flow_min"], pipe["flow_max"]
-
-            if degree_fr(network, pipe) + degree_to(network, pipe) <= 2
-                flow_min_mid = flow_min + 0.5 * (flow_result - flow_min)
-                flow_max_mid = flow_result + 0.5 * (flow_max - flow_result)
-                pipe["flow_lower_breakpoints"] = [flow_min, flow_min_mid, flow_result, flow_max_mid, flow_max]
-                pipe["flow_upper_breakpoints"] = [flow_min, flow_min_mid, flow_result, flow_max_mid, flow_max]
-            else
-                flow_mid = flow_min + 0.5 * (flow_max - flow_min)
-                flow_min_mid = flow_min + 0.5 * (flow_mid - flow_min)
-                flow_max_mid = flow_mid + 0.5 * (flow_max - flow_mid)
-                pipe["flow_lower_breakpoints"] = [flow_min, flow_result, flow_max]
-                pipe["flow_upper_breakpoints"] = [flow_min, flow_max]
-            end
-         end
-
-         for (i, pump) in network["pump"]
-            flow_result = max(0.0, result["pump"][i]["q"])
-            flow_min, flow_max = pump["flow_min_forward"], pump["flow_max"]
-
-            if flow_result > 1.0e-4
-                flow_min_mid = flow_min + 0.5 * (flow_result - flow_min)
-                flow_max_mid = flow_result + 0.5 * (flow_max - flow_result)
-                pump["flow_lower_breakpoints"] = [flow_min, flow_min_mid, flow_result, flow_max_mid, flow_max]
-                pump["flow_upper_breakpoints"] = [flow_min, flow_min_mid, flow_result, flow_max_mid, flow_max]
-            else
-                flow_mid = flow_min + 0.5 * (flow_max - flow_min)
-                flow_min_mid = flow_min + 0.5 * (flow_mid - flow_min)
-                flow_max_mid = flow_mid + 0.5 * (flow_max - flow_mid)
-                pump["flow_lower_breakpoints"] = [flow_min, flow_min_mid, flow_mid, flow_max_mid, flow_max]
-                pump["flow_upper_breakpoints"] = [flow_min, flow_min_mid, flow_mid, flow_max_mid, flow_max]
-            end
-         end
-    end
-end
-
-
 function set_lazy_attributes!(wm::WM.AbstractWaterModel)
     for nw in sort(collect(WM.nw_ids(wm)))[1:end-1]
         for constraints in values(WM.con(wm, nw, :pipe_head_loss))
@@ -207,38 +84,12 @@ function set_lazy_attributes!(wm::WM.AbstractWaterModel)
                     JuMP.index.(constraints), 2)
         end
 
-        # for constraints in values(WM.con(wm, nw, :pipe_flow))
-        #     WM._MOI.set.(Ref(JuMP.backend(wm.model).optimizer),
-        #             Ref(Gurobi.ConstraintAttribute("Lazy")),
-        #             JuMP.index.(constraints), 2)
-        # end
-
-        # for constraints in values(WM.con(wm, nw, :pipe_head))
-        #     WM._MOI.set.(Ref(JuMP.backend(wm.model).optimizer),
-        #             Ref(Gurobi.ConstraintAttribute("Lazy")),
-        #             JuMP.index.(constraints), 2)
-        # end
-
         for constraints in values(WM.con(wm, nw, :on_off_pump_head_gain))
             WM._MOI.set.(Ref(JuMP.backend(wm.model).optimizer),
                     Ref(Gurobi.ConstraintAttribute("Lazy")),
                     JuMP.index.(constraints), 2)
         end
     end
-
-    # for nw in sort(collect(WM.nw_ids(wm)))[1:end]
-    #     for constraints in values(WM.con(wm, nw, :tank_volume))
-    #         WM._MOI.set.(Ref(JuMP.backend(wm.model).optimizer),
-    #                 Ref(Gurobi.ConstraintAttribute("Lazy")),
-    #                 JuMP.index.(constraints), 2)
-    #     end
-    # end
-
-    # for constraints in values(WM.con(wm, sort(collect(WM.nw_ids(wm)))[end], :tank_volume_recovery))
-    #     WM._MOI.set.(Ref(JuMP.backend(wm.model).optimizer),
-    #                     Ref(Gurobi.ConstraintAttribute("Lazy")),
-    #                     JuMP.index.(constraints), 3)
-    # end
 end
 
 
@@ -274,6 +125,23 @@ function set_branching_priorities!(wm::WM.AbstractWaterModel)
             priority += 1
         end
     end
+end
+
+
+function solve_owf(network::Dict, mip_optimizer, nlp_optimizer, breakpoint_function!::Function)
+    # Parse the network data.
+    network_mn = WM.make_multinetwork(network)
+
+    # Solve a continuously-relaxed version of the problem.
+    wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
+    result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
+
+    # Set the breakpoints to be used for nonlinear functions.
+    breakpoint_function!(network_mn, result_micp)
+    wm_master = construct_owf_model(network_mn, mip_optimizer)
+
+    # Solve the model and return the result.
+    return WM.optimize_model!(wm_master; relax_integrality = false)
 end
 
 
@@ -322,7 +190,9 @@ function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_opti
 
     set_branching_priorities!(wm_master)
     set_lazy_attributes!(wm_master)
-    add_price_cuts!(wm_master)
+
+    # add_price_cuts!(wm_master)
+
     WM.JuMP.set_optimizer_attribute(wm_master.model, "TimeLimit", 60.0)
     result = WM.optimize_model!(wm_master; relax_integrality = false)
     WM.Memento.info(LOGGER, "Solved for $(result["solve_time"]) seconds.")

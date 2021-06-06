@@ -40,6 +40,7 @@ include("form/lrdx.jl")
 include("prob/wf.jl")
 include("prob/owfh.jl")
 
+include("alg/set_breakpoints.jl")
 include("alg/dantzig_wolfe.jl")
 include("alg/simulate.jl")
 include("alg/heuristic_relaxed_milp.jl")
