@@ -33,7 +33,13 @@ function set_breakpoints_oa!(network_mn::Dict{String, <:Any}, result_mn::Dict{St
 
         for (i, pipe) in network["pipe"]
             flow_min, flow_max = pipe["flow_min"], pipe["flow_max"]
-            flow_mid = max(flow_min, result["pipe"][i]["q"])
+
+            if abs(result["pipe"][i]["q"]) > 1.0e-4
+                flow_mid = max(flow_min, result["pipe"][i]["q"])
+            else
+                flow_mid = 0.5 * (flow_min + flow_max)
+            end
+
             flow_min_mid = 0.5 * (flow_min + flow_mid)
             flow_max_mid = 0.5 * (flow_mid + flow_max)
 
@@ -47,13 +53,12 @@ function set_breakpoints_oa!(network_mn::Dict{String, <:Any}, result_mn::Dict{St
             
             if result["pump"][i]["q"] > 1.0e-4
                 flow_mid = max(pump["flow_min"], result["pump"][i]["q"])
-                flow_min_mid = 0.5 * (flow_mid + flow_min)
-                flow_max_mid = 0.5 * (flow_max + flow_mid)
             else
                 flow_mid = 0.5 * (flow_max + flow_min)
-                flow_min_mid = 0.5 * (flow_mid + flow_min)
-                flow_max_mid = 0.5 * (flow_max + flow_mid)
             end
+
+            flow_min_mid = 0.5 * (flow_mid + flow_min)
+            flow_max_mid = 0.5 * (flow_max + flow_mid)
 
             pump["flow_lower_breakpoints"] = [flow_min, flow_max]
             pump["flow_upper_breakpoints"] = [flow_min, flow_min_mid,
@@ -70,14 +75,20 @@ function set_breakpoints_piecewise!(network_mn::Dict{String, <:Any}, result_mn::
 
         for (i, pipe) in network["pipe"]
             flow_min, flow_max = pipe["flow_min"], pipe["flow_max"]
-            flow_mid = max(flow_min, result["pipe"][i]["q"])
+
+            if abs(result["pipe"][i]["q"]) > 1.0e-4
+                flow_mid = max(flow_min, result["pipe"][i]["q"])
+            else
+                flow_mid = 0.5 * (flow_min + flow_max)
+            end
+
             flow_min_mid = 0.5 * (flow_min + flow_mid)
             flow_max_mid = 0.5 * (flow_mid + flow_max)
 
-            pipe["flow_lower_breakpoints"] = [flow_min,
-                flow_min_mid, flow_mid, flow_max_mid, flow_max]
-            pipe["flow_upper_breakpoints"] = [flow_min,
-                flow_min_mid, flow_mid, flow_max_mid, flow_max]
+            pipe["flow_lower_breakpoints"] = sort([flow_min,
+                flow_min_mid, flow_mid, flow_max_mid, flow_max])
+            pipe["flow_upper_breakpoints"] = sort([flow_min,
+                flow_min_mid, flow_mid, flow_max_mid, flow_max])
          end
 
          for (i, pump) in network["pump"]
@@ -85,18 +96,17 @@ function set_breakpoints_piecewise!(network_mn::Dict{String, <:Any}, result_mn::
 
             if result["pump"][i]["q"] > 1.0e-4
                 flow_mid = max(pump["flow_min"], result["pump"][i]["q"])
-                flow_min_mid = 0.5 * (flow_mid + flow_min)
-                flow_max_mid = 0.5 * (flow_max + flow_mid)
             else
                 flow_mid = 0.5 * (flow_max + flow_min)
-                flow_min_mid = 0.5 * (flow_mid + flow_min)
-                flow_max_mid = 0.5 * (flow_max + flow_mid)
             end
 
-            pump["flow_lower_breakpoints"] = [flow_min,
-                flow_min_mid, flow_mid, flow_max_mid, flow_max]
-            pump["flow_upper_breakpoints"] = [flow_min,
-                flow_min_mid, flow_mid, flow_max_mid, flow_max]
+            flow_min_mid = 0.5 * (flow_mid + flow_min)
+            flow_max_mid = 0.5 * (flow_max + flow_mid)
+
+            pump["flow_lower_breakpoints"] = sort([flow_min,
+                flow_min_mid, flow_mid, flow_max_mid, flow_max])
+            pump["flow_upper_breakpoints"] = sort([flow_min,
+                flow_min_mid, flow_mid, flow_max_mid, flow_max])
         end
     end
 end
@@ -111,7 +121,12 @@ function set_breakpoints_piecewise_degree!(network_mn::Dict{String, <:Any}, resu
             flow_min, flow_max = pipe["flow_min"], pipe["flow_max"]
 
             if degree_fr(network, pipe) + degree_to(network, pipe) <= 2
-                flow_mid = max(flow_min, result["pipe"][i]["q"])
+                if abs(result["pipe"][i]["q"]) > 1.0e-4
+                    flow_mid = max(flow_min, result["pipe"][i]["q"])
+                else
+                    flow_mid = 0.5 * (flow_min + flow_max)
+                end
+
                 flow_min_mid = 0.5 * (flow_mid + flow_min)
                 flow_max_mid = 0.5 * (flow_max + flow_mid)
 
@@ -133,14 +148,13 @@ function set_breakpoints_piecewise_degree!(network_mn::Dict{String, <:Any}, resu
             flow_min, flow_max = pump["flow_min_forward"], pump["flow_max"]
 
             if result["pump"][i]["q"] > 1.0e-4
-                flow_mid = max(flow_min, result["pump"][i]["q"])
-                flow_min_mid = 0.5 * (flow_mid + flow_min)
-                flow_max_mid = 0.5 * (flow_max + flow_mid)
+                flow_mid = max(flow_min, result["pump"][i]["q"])                
             else
                 flow_mid = 0.5 * (flow_max + flow_min)
-                flow_min_mid = 0.5 * (flow_mid + flow_min)
-                flow_max_mid = 0.5 * (flow_max + flow_mid)
             end
+
+            flow_min_mid = 0.5 * (flow_mid + flow_min)
+            flow_max_mid = 0.5 * (flow_max + flow_mid)
 
             pump["flow_lower_breakpoints"] = [flow_min,
                 flow_min_mid, flow_mid, flow_max_mid, flow_max]
