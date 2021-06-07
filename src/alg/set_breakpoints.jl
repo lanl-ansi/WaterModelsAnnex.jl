@@ -149,3 +149,20 @@ function set_breakpoints_piecewise_degree!(network_mn::Dict{String, <:Any}, resu
         end
     end
 end
+
+
+function set_breakpoints_num!(network::Dict{String, <:Any}, num_breakpoints::Int)
+    for pipe in values(network["pipe"])
+        flow_min, flow_max = pipe["flow_min"], pipe["flow_max"]
+        breakpoints = range(flow_min, flow_max; length = num_breakpoints)
+        pipe["flow_lower_breakpoints"] = breakpoints
+        pipe["flow_upper_breakpoints"] = breakpoints
+    end
+
+    for pump in values(network["pump"])
+        flow_min, flow_max = pump["flow_min_forward"], pump["flow_max"]
+        breakpoints = range(flow_min, flow_max; length = num_breakpoints)
+        pump["flow_lower_breakpoints"] = breakpoints
+        pump["flow_upper_breakpoints"] = breakpoints
+    end
+end

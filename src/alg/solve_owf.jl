@@ -2,12 +2,9 @@ function compute_pairwise_cuts(network::Dict{String, Any}, optimizer)
     # Relax the network.
     WM._relax_network!(network)
 
-    # Specify extensions to be used in the WaterModels formulation.
-    ext = Dict(:pipe_breakpoints => 10, :pump_breakpoints => 10)
-
     # Construct independent thread-local WaterModels objects.
     wms = [WM.instantiate_model(network, WM.PWLRDWaterModel,
-        WM.build_owf; ext = ext) for i in 1:Threads.nthreads()]
+        WM.build_owf) for i in 1:Threads.nthreads()]
 
     # Set the optimizer for the WaterModels objects.
     map(x -> JuMP.set_optimizer(x.model, optimizer), wms)
@@ -142,6 +139,45 @@ function solve_owf(network::Dict, mip_optimizer, nlp_optimizer, breakpoint_funct
 
     # Solve the model and return the result.
     return WM.optimize_model!(wm_master; relax_integrality = false)
+end
+
+
+function solve_pairwise_cuts(network::Dict, optimizer)
+    WM.Memento.info(LOGGER, "Beginning cut preprocessing routine.")
+    set_breakpoints_num!(network, 10)
+    cut_time = @elapsed pairwise_cuts = compute_pairwise_cuts(network, optimizer)
+    WM.Memento.info(LOGGER, "Pairwise cut preprocessing completed in $(cut_time) seconds.")
+    return pairwise_cuts
+end
+
+
+function load_pairwise_cuts(path::String)
+    cuts_array = Vector{WM._PairwiseCut}([])
+    
+    for entry in WM.JSON.parsefile(path)
+        vid_1_network_index = Int(entry["variable_index_1"]["network_index"])
+        vid_1_component_type = Symbol(entry["variable_index_1"]["component_type"])
+        vid_1_variable_symbol = Symbol(entry["variable_index_1"]["variable_symbol"])
+        vid_1_component_index = Int(entry["variable_index_1"]["component_index"])
+        vid_1 = WM._VariableIndex(vid_1_network_index, vid_1_component_type,
+            vid_1_variable_symbol, vid_1_component_index)
+
+        vid_2_network_index = Int(entry["variable_index_2"]["network_index"])
+        vid_2_component_type = Symbol(entry["variable_index_2"]["component_type"])
+        vid_2_variable_symbol = Symbol(entry["variable_index_2"]["variable_symbol"])
+        vid_2_component_index = Int(entry["variable_index_2"]["component_index"])
+        vid_2 = WM._VariableIndex(vid_2_network_index, vid_2_component_type,
+            vid_2_variable_symbol, vid_2_component_index)
+
+        coefficient_1 = entry["coefficient_1"]
+        coefficient_2 = entry["coefficient_2"]
+        constant = entry["constant"]
+        
+        push!(cuts_array, WM._PairwiseCut(coefficient_1, vid_1,
+            coefficient_2, vid_2, constant))
+    end
+
+    return cuts_array
 end
 
 
