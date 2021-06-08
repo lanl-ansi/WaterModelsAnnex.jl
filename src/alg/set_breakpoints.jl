@@ -61,8 +61,7 @@ function set_breakpoints_oa!(network_mn::Dict{String, <:Any}, result_mn::Dict{St
             flow_max_mid = 0.5 * (flow_max + flow_mid)
 
             pump["flow_lower_breakpoints"] = [flow_min, flow_max]
-            pump["flow_upper_breakpoints"] = [flow_min, flow_min_mid,
-                flow_mid, flow_max_mid, flow_max]
+            pump["flow_upper_breakpoints"] = range(flow_min, flow_max; length = 10)
         end
     end
 end
@@ -105,8 +104,7 @@ function set_breakpoints_piecewise!(network_mn::Dict{String, <:Any}, result_mn::
 
             pump["flow_lower_breakpoints"] = sort([flow_min,
                 flow_min_mid, flow_mid, flow_max_mid, flow_max])
-            pump["flow_upper_breakpoints"] = sort([flow_min,
-                flow_min_mid, flow_mid, flow_max_mid, flow_max])
+            pump["flow_upper_breakpoints"] = range(flow_min, flow_max; length = 10)
         end
     end
 end
@@ -147,8 +145,8 @@ function set_breakpoints_piecewise_degree!(network_mn::Dict{String, <:Any}, resu
         for (i, pump) in network["pump"]
             flow_min, flow_max = pump["flow_min_forward"], pump["flow_max"]
 
-            if result["pump"][i]["q"] > 1.0e-4
-                flow_mid = max(flow_min, result["pump"][i]["q"])                
+            if abs(result["pump"][i]["q"]) > flow_min
+                flow_mid = result["pump"][i]["q"]
             else
                 flow_mid = 0.5 * (flow_max + flow_min)
             end
@@ -158,8 +156,7 @@ function set_breakpoints_piecewise_degree!(network_mn::Dict{String, <:Any}, resu
 
             pump["flow_lower_breakpoints"] = [flow_min,
                 flow_min_mid, flow_mid, flow_max_mid, flow_max]
-            pump["flow_upper_breakpoints"] = [flow_min,
-                flow_min_mid, flow_mid, flow_max_mid, flow_max]
+            pump["flow_upper_breakpoints"] = range(flow_min, flow_max; length = 10)
         end
     end
 end
@@ -178,5 +175,24 @@ function set_breakpoints_num!(network::Dict{String, <:Any}, num_breakpoints::Int
         breakpoints = range(flow_min, flow_max; length = num_breakpoints)
         pump["flow_lower_breakpoints"] = breakpoints
         pump["flow_upper_breakpoints"] = breakpoints
+    end
+end
+
+
+function set_breakpoints_num_mn!(network::Dict{String, <:Any}, num_breakpoints::Int)
+    for nw_id in sort([parse(Int, x) for x in collect(keys(network["nw"]))])[1:end-1]
+        for pipe in values(network["nw"][string(nw_id)]["pipe"])
+            flow_min, flow_max = pipe["flow_min"], pipe["flow_max"]
+            breakpoints = range(flow_min, flow_max; length = num_breakpoints)
+            pipe["flow_lower_breakpoints"] = breakpoints
+            pipe["flow_upper_breakpoints"] = breakpoints
+        end
+    
+        for pump in values(network["nw"][string(nw_id)]["pump"])
+            flow_min, flow_max = pump["flow_min_forward"], pump["flow_max"]
+            breakpoints = range(flow_min, flow_max; length = num_breakpoints)
+            pump["flow_lower_breakpoints"] = breakpoints
+            pump["flow_upper_breakpoints"] = breakpoints
+        end
     end
 end

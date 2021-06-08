@@ -296,6 +296,121 @@ function simulate_control_setting(wm::AbstractCQModel, control_setting::ControlS
 end
 
 
+function update_data_from_simulation_result(wm::AbstractCQModel, result::SimulationResult, nw::Int)
+    if !haskey(wm.data, "time_series")
+        wm.data["time_series"] = Dict{String, Any}()
+    end
+
+    if !haskey(wm.data["time_series"], "tank")
+        wm.data["time_series"]["tank"] = Dict{String, Any}()
+
+        for (i, tank) in wm.data["tank"]
+            wm.data["time_series"]["tank"][i] = Dict{String, Any}()
+            level_array = ones(wm.data["time_series"]["num_steps"]) * tank["init_level"]
+            wm.data["time_series"]["tank"][i]["init_level"] = level_array
+        end
+    end
+
+    for (i, tank) in wm.data["time_series"]["tank"]
+        surface_area = 0.25 * pi * wm.data["tank"][i]["diameter"]^2
+        tank["init_level"][nw+1] = tank["init_level"][nw] -
+            result.q_tank[parse(Int, i)] / surface_area *
+            wm.data["time_series"]["time_step"]
+    end
+end
+
+
+function switch_random_pump!(control_settings::Vector{ControlSetting}, nw_ids::Vector{Int})
+    rand_nw = nw_ids[rand(1:end)]
+    vids = control_settings[rand_nw].variable_indices
+    vals = control_settings[rand_nw].vals
+
+    ids_z = findall(x -> x.variable_symbol == :z_pump, vids)
+    id_random = ids_z[rand(1:end)]
+    vals[id_random] = vals[id_random] == 1.0 ? 0.0 : 1.0
+
+    # turned_on = false
+
+    # while !turned_on
+    #     # turned_on = true
+
+    #     # ids_off = findall(x -> vals[x] == 0.0, ids_z)
+
+    #     # if length(ids_off) > 0
+    #     #     id_random = Random.shuffle(ids_off)[1]
+    #     #     vals[id_random] = 1.0
+    #     #     turned_on = true
+    #     # end
+    # end
+end
+
+
+function correct_control_settings!(wm::AbstractCQModel, control_settings::Vector{ControlSetting})
+    control_settings_tmp = deepcopy(control_settings)
+    feasible, num_iterations = false, 0
+    nw_ids = sort(collect(keys(control_settings_tmp)))
+
+    while !feasible && num_iterations <= 100        
+        for (k, nw_id) in enumerate(nw_ids)
+            simulation_result = simulate_control_setting(wm, control_settings_tmp[nw_id])
+            update_data_from_simulation_result(wm, simulation_result, nw_id)
+            println(simulation_result.feasible)
+
+            if !simulation_result.feasible
+                switch_random_pump!(control_settings_tmp, nw_ids[1:k])
+                num_iterations += 1
+                feasible = false
+                break
+            else
+                feasible = true
+            end
+        end
+
+        println(num_iterations)
+    end
+
+    # for nw_id in sort(collect(keys(control_settings)))
+    #     simulation_result = simulate_control_setting(wm, control_settings[nw_id])
+    #     update_data_from_simulation_result(wm, simulation_result, nw_id)
+
+    #     if !simulation_result.feasible
+    #         return false, Inf
+    #     end
+
+    #     total_cost += simulation_result.cost
+    # end
+end
+
+
+function simulate_control_settings_sequential(wm::AbstractCQModel, control_settings::Vector{ControlSetting})
+    total_cost = 0.0
+
+    for nw_id in sort(collect(keys(control_settings)))
+        simulation_result = simulate_control_setting(wm, control_settings[nw_id])
+        update_data_from_simulation_result(wm, simulation_result, nw_id)
+
+        println(nw_id, " ", simulation_result.feasible)
+
+        if !simulation_result.feasible
+            return false, Inf
+        end
+
+        total_cost += simulation_result.cost
+    end
+
+    # Check if the tank level constraints have been violated.
+    for (i, tank) in wm.data["time_series"]["tank"]
+        if tank["init_level"][end] < wm.data["tank"][i]["min_level"]
+            return false, Inf
+        elseif tank["init_level"][end] > wm.data["tank"][i]["max_level"]
+            return false, Inf
+        end
+    end
+
+    return true, total_cost
+end
+
+
 function _instantiate_cq_model(data::Dict{String, <:Any}, optimizer)
     wm = WM.instantiate_model(data, CQWaterModel, WM.build_wf)
     JuMP.set_optimizer(wm.model, optimizer)

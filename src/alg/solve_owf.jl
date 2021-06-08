@@ -207,6 +207,34 @@ function load_pairwise_cuts(path::String)
 end
 
 
+function simulate_result_mn(network::Dict{String, <:Any}, result::Dict{String, <:Any}, nlp_optimizer)
+    wm_cq = _instantiate_cq_model(network, nlp_optimizer)
+    control_settings = get_control_settings_from_result(result)
+    simulate_control_settings_sequential(wm_cq, control_settings)
+end
+
+
+function solve_owf_with_heuristic(network::Dict, heuristic_path::String, mip_optimizer, nlp_optimizer)
+    # Solve a relaxed version of the problem and set breakpoints.
+    network_mn = WM.make_multinetwork(network)
+    wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
+    result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
+    set_breakpoints_piecewise_degree!(network_mn, result_micp)
+
+    # heuristic_result = WM.JSON.parsefile(heuristic_path)
+    # wm_cq = _instantiate_cq_model(network, nlp_optimizer)
+
+    # Solve the model and return the result.
+    wm_master = construct_owf_model(network_mn, mip_optimizer)
+    return WM.optimize_model!(wm_master; relax_integrality = false)
+
+    # control_settings = get_control_settings_from_result(result)
+    # simulate_control_settings_sequential(wm_cq, control_settings)
+
+    # sim_result = simulate!(network, heuristic_result, nlp_optimizer)
+end
+
+
 function solve_owf(network_path::String, obbt_optimizer, owf_optimizer, nlp_optimizer; use_new::Bool = true, kwargs...)
     network = WM.parse_file(network_path)
     network_mn = WM.make_multinetwork(network)
