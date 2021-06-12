@@ -130,18 +130,17 @@ end
 function constraint_pipe_flow_nonlinear(
     wm::AbstractLRDXModel, n::Int, a::Int, node_fr::Int, node_to::Int, exponent::Float64,
     L::Float64, r::Float64, q_max_reverse::Float64, q_min_forward::Float64)
-    # Get the number of breakpoints for the pipe.
-    num_breakpoints = get(wm.ext, :pipe_breakpoints, 1)
+    # Get object from the WaterModels reference dictionary.
+    pipe = WM.ref(wm, n, :pipe, a)
 
     # Get the variable for flow directionality.
     y = WM.var(wm, n, :y_pipe, a)
 
     # Get variables for positive flow and head difference.
     qp, qp_nl = WM.var(wm, n, :qp_pipe, a), WM.var(wm, n, :qp_nl_pipe, a)
-    qp_min_forward, qp_ub = max(0.0, q_min_forward), JuMP.upper_bound(qp)
 
     # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in range(qp_min_forward, stop = JuMP.upper_bound(qp), length = num_breakpoints)
+    for pt in abs.(WM.get_pipe_flow_lower_breakpoints_positive(pipe))
         # Add a linear outer approximation of the convex relaxation at `pt`.
         lhs = _calc_pipe_flow_integrated_oa(qp, y, pt, exponent)
 
@@ -152,18 +151,19 @@ function constraint_pipe_flow_nonlinear(
         append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
     end
 
-    if qp_min_forward < qp_ub
-        rhs = _calc_pipe_flow_integrated_bound(qp, y, qp_min_forward, qp_ub, exponent)
-        c = JuMP.@constraint(wm.model, qp_nl / L <= r * rhs)
-         append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
-    end
+    lambda_p = WM.var(wm, n, :lambda_p_pipe)
+    breakpoints_p = abs.(WM.get_pipe_flow_upper_breakpoints_positive(pipe))
+    num_lambda_p = length(breakpoints_p)
+    f_p = (r * 1.0 / (1.0 + exponent)) .* breakpoints_p.^(1.0 + exponent)
+    qp_nl_ub_expr = sum(f_p[k] * lambda_p[a, k] for k in 1:num_lambda_p)
+    c = JuMP.@constraint(wm.model, qp_nl / L <= qp_nl_ub_expr)
+    append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
 
     # Get variables for negative flow and head difference.
     qn, qn_nl = WM.var(wm, n, :qn_pipe, a), WM.var(wm, n, :qn_nl_pipe, a)
-    qn_min_forward, qn_ub = max(0.0, -q_max_reverse), JuMP.upper_bound(qn)
 
     # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in range(qn_min_forward, stop = JuMP.upper_bound(qn), length = num_breakpoints)
+    for pt in abs.(WM.get_pipe_flow_lower_breakpoints_negative(pipe))
         # Add a linear outer approximation of the convex relaxation at `pt`.
         lhs = _calc_pipe_flow_integrated_oa(qn, 1.0 - y, pt, exponent)
 
@@ -174,19 +174,25 @@ function constraint_pipe_flow_nonlinear(
         append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
     end
 
-    if qn_min_forward < qn_ub
-        rhs = _calc_pipe_flow_integrated_bound(qn, 1.0 - y, qn_min_forward, qn_ub, exponent)
-        c = JuMP.@constraint(wm.model, qn_nl / L <= r * rhs)
-        append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
-    end
+    lambda_n = WM.var(wm, n, :lambda_n_pipe)
+    breakpoints_n = abs.(WM.get_pipe_flow_upper_breakpoints_negative(pipe))
+    num_lambda_n = length(breakpoints_n)
+    f_n = (r * 1.0 / (1.0 + exponent)) .* breakpoints_n.^(1.0 + exponent)
+    qn_nl_ub_expr = sum(f_n[k] * lambda_n[a, k] for k in 1:num_lambda_n)
+    c = JuMP.@constraint(wm.model, qn_nl / L <= qn_nl_ub_expr)
+    append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
 end
 
 
 function constraint_pipe_head_nonlinear(
     wm::AbstractLRDXModel, n::Int, a::Int, node_fr::Int, node_to::Int, exponent::Float64,
     L::Float64, r::Float64, q_max_reverse::Float64, q_min_forward::Float64)
-    # Get the number of breakpoints for the pipe.
-    num_breakpoints = get(wm.ext, :pipe_breakpoints, 1)
+    # Get object from the WaterModels reference dictionary.
+    pipe = WM.ref(wm, n, :pipe, a)
+    head_loss = wm.ref[:it][WM.wm_it_sym][:head_loss]
+    viscosity = wm.ref[:it][WM.wm_it_sym][:viscosity]
+    base_length = get(wm.data, "base_length", 1.0)
+    base_time = get(wm.data, "base_time", 1.0)
 
     # Get the variable for flow directionality.
     y = WM.var(wm, n, :y_pipe, a)
@@ -194,10 +200,10 @@ function constraint_pipe_head_nonlinear(
 
     # Get variables for positive flow and head difference.
     dhp, dhp_nl = WM.var(wm, n, :dhp_pipe, a), WM.var(wm, n, :dhp_nl_pipe, a)
-    dhp_lb, dhp_ub = 0.0, JuMP.upper_bound(dhp)
 
     # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in range(dhp_lb, stop = dhp_ub, length = num_breakpoints)
+    for pt in abs.(WM.get_pipe_head_difference_lower_breakpoints_positive(
+        pipe, head_loss, viscosity, base_length, base_time))
         # Add a linear outer approximation of the convex relaxation at `pt`.
         lhs = _calc_pipe_head_integrated_oa(dhp, y, pt, exponent)
 
@@ -208,18 +214,21 @@ function constraint_pipe_head_nonlinear(
         append!(WM.con(wm, n, :pipe_head_nonlinear)[a], [c])
     end
 
-    if dhp_lb < dhp_ub
-        rhs = _calc_pipe_head_integrated_bound(dhp, y, dhp_lb, dhp_ub, exponent)
-        c = JuMP.@constraint(wm.model, dhp_nl / L_r <= r_r * rhs)
-        append!(WM.con(wm, n, :pipe_head_nonlinear)[a], [c])
-    end
+    lambda_p = WM.var(wm, n, :lambda_p_pipe)
+    breakpoints_p = abs.(WM.get_pipe_head_difference_upper_breakpoints_positive(
+        pipe, head_loss, viscosity, base_length, base_time))
+    num_lambda_p = length(breakpoints_p)
+    f_p = (r_r * exponent / (1.0 + exponent)) .* breakpoints_p.^(1.0 + 1.0 / exponent)
+    dhp_nl_ub_expr = sum(f_p[k] * lambda_p[a, k] for k in 1:num_lambda_p)
+    c = JuMP.@constraint(wm.model, dhp_nl / L_r <= dhp_nl_ub_expr)
+    append!(WM.con(wm, n, :pipe_head_nonlinear)[a], [c])
 
     # Get variables for positive flow and head difference.
     dhn, dhn_nl = WM.var(wm, n, :dhn_pipe, a), WM.var(wm, n, :dhn_nl_pipe, a)
-    dhn_lb, dhn_ub = 0.0, JuMP.upper_bound(dhn)
 
     # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in range(dhn_lb, stop = dhn_ub, length = num_breakpoints)
+    for pt in abs.(WM.get_pipe_head_difference_lower_breakpoints_negative(
+        pipe, head_loss, viscosity, base_length, base_time))
         # Add a linear outer approximation of the convex relaxation at `pt`.
         lhs = _calc_pipe_head_integrated_oa(dhn, 1.0 - y, pt, exponent)
 
@@ -230,11 +239,14 @@ function constraint_pipe_head_nonlinear(
         append!(WM.con(wm, n, :pipe_head_nonlinear)[a], [c])
     end
 
-    if dhn_lb < dhn_ub
-        rhs = _calc_pipe_head_integrated_bound(dhn, 1.0 - y, dhn_lb, dhn_ub, exponent)
-        c = JuMP.@constraint(wm.model, dhn_nl / L_r <= r_r * rhs)
-        append!(WM.con(wm, n, :pipe_head_nonlinear)[a], [c])
-    end
+    lambda_n = WM.var(wm, n, :lambda_n_pipe)
+    breakpoints_n = abs.(WM.get_pipe_head_difference_upper_breakpoints_negative(
+        pipe, head_loss, viscosity, base_length, base_time))
+    num_lambda_n = length(breakpoints_n)
+    f_n = (r_r * exponent / (1.0 + exponent)) .* breakpoints_n.^(1.0 + 1.0 / exponent)
+    dhn_nl_ub_expr = sum(f_n[k] * lambda_n[a, k] for k in 1:num_lambda_n)
+    c = JuMP.@constraint(wm.model, dhn_nl / L_r <= dhn_nl_ub_expr)
+    append!(WM.con(wm, n, :pipe_head_nonlinear)[a], [c])
 end
 
 
