@@ -242,11 +242,6 @@ end
 function check_simulation_feasibility(wm::AbstractCQModel)::Bool
     solved = JuMP.termination_status(wm.model) === WM._MOI.LOCALLY_SOLVED
     almost_solved = JuMP.termination_status(wm.model) === WM._MOI.ALMOST_LOCALLY_SOLVED
-
-    # if !(solved || almost_solved)
-    #     println(JuMP.termination_status(wm.model))
-    # end
-    
     return solved || almost_solved ? check_physical_feasibility(wm) : false
 end
 
@@ -354,7 +349,6 @@ function correct_control_settings!(wm::AbstractCQModel, control_settings::Vector
         for (k, nw_id) in enumerate(nw_ids)
             simulation_result = simulate_control_setting(wm, control_settings_tmp[nw_id])
             update_data_from_simulation_result(wm, simulation_result, nw_id)
-            println(simulation_result.feasible)
 
             if !simulation_result.feasible
                 switch_random_pump!(control_settings_tmp, nw_ids[1:k])
@@ -365,8 +359,6 @@ function correct_control_settings!(wm::AbstractCQModel, control_settings::Vector
                 feasible = true
             end
         end
-
-        println(num_iterations)
     end
 
     # for nw_id in sort(collect(keys(control_settings)))
@@ -383,31 +375,28 @@ end
 
 
 function simulate_control_settings_sequential(wm::AbstractCQModel, control_settings::Vector{ControlSetting})
-    total_cost = 0.0
+    simulation_results = Vector{SimulationResult}([])
 
     for nw_id in sort(collect(keys(control_settings)))
         simulation_result = simulate_control_setting(wm, control_settings[nw_id])
         update_data_from_simulation_result(wm, simulation_result, nw_id)
-
-        println(nw_id, " ", simulation_result.feasible)
+        push!(simulation_results, simulation_result)
 
         if !simulation_result.feasible
-            return false, Inf
+             return simulation_results
         end
-
-        total_cost += simulation_result.cost
     end
 
     # Check if the tank level constraints have been violated.
     for (i, tank) in wm.data["time_series"]["tank"]
         if tank["init_level"][end] < wm.data["tank"][i]["min_level"]
-            return false, Inf
+            simulation_results[end].feasible = false
         elseif tank["init_level"][end] > wm.data["tank"][i]["max_level"]
-            return false, Inf
+            simulation_results[end].feasible = false
         end
     end
 
-    return true, total_cost
+    return simulation_results
 end
 
 

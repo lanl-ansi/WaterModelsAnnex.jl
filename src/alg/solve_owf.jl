@@ -208,8 +208,8 @@ end
 
 
 function simulate_result_mn(network::Dict{String, <:Any}, result::Dict{String, <:Any}, nlp_optimizer)
-    wm_cq = _instantiate_cq_model(network, nlp_optimizer)
-    control_settings = get_control_settings_from_result(result)
+    wm_cq = _instantiate_cq_model(deepcopy(network), nlp_optimizer)
+    control_settings = get_control_settings_from_result(deepcopy(result))
     simulate_control_settings_sequential(wm_cq, control_settings)
 end
 
@@ -221,15 +221,16 @@ function solve_owf_with_heuristic(network::Dict, heuristic_path::String, mip_opt
     result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
     set_breakpoints_piecewise_degree!(network_mn, result_micp)
 
-    # heuristic_result = WM.JSON.parsefile(heuristic_path)
-    # wm_cq = _instantiate_cq_model(network, nlp_optimizer)
+    heuristic_result = WM.JSON.parsefile(heuristic_path)
+    wm_cq = _instantiate_cq_model(network, nlp_optimizer)
+    control_settings = get_control_settings_from_result(heuristic_result)
 
     # Solve the model and return the result.
-    wm_master = construct_owf_model(network_mn, mip_optimizer)
-    return WM.optimize_model!(wm_master; relax_integrality = false)
+    # wm_master = construct_owf_model(network_mn, mip_optimizer)
+    # return WM.optimize_model!(wm_master; relax_integrality = false)
 
     # control_settings = get_control_settings_from_result(result)
-    # simulate_control_settings_sequential(wm_cq, control_settings)
+    return simulate_control_settings_sequential(wm_cq, control_settings)
 
     # sim_result = simulate!(network, heuristic_result, nlp_optimizer)
 end

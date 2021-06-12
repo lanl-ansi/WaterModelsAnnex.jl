@@ -194,7 +194,6 @@ function objective_strong_duality(wm::AbstractCQModel)
 
     f_1 = Array{Any, 1}([0.0])
     f_2 = Array{Any, 1}([0.0])
-    f_3 = Array{Any, 1}([0.0])
 
     for (n, network) in WM.nws(wm)
         # Get pipe flow variables.
