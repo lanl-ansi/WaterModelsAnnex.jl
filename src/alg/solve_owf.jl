@@ -46,9 +46,9 @@ function construct_owf_model_relaxed(network_mn::Dict{String, Any}, optimizer; k
 end
 
 
-function construct_owf_model(network_mn::Dict{String, Any}, owf_optimizer; use_new::Bool = true, kwargs...)
+function construct_owf_model(network_mn::Dict{String, Any}, owf_optimizer; use_pwlrd::Bool = true, kwargs...)
     # Specify model options and construct the multinetwork OWF model.
-    model_type = use_new ? WM.PWLRDWaterModel : WM.LRDWaterModel
+    model_type = use_pwlrd ? WM.PWLRDWaterModel : WM.LRDXWaterModel
     wm = WM.instantiate_model(network_mn, model_type, WM.build_mn_owf)
 
     # Set the optimizer and other important solver parameters.
@@ -162,6 +162,27 @@ function solve_owf_with_cuts(network::Dict, pc_path::String, mip_optimizer, nlp_
         add_pairwise_cuts(wm_master, pairwise_cuts)
         add_pump_volume_cuts!(wm_master)
     end
+
+    # Solve the model and return the result.
+    return WM.optimize_model!(wm_master; relax_integrality = false)
+end
+
+
+function solve_owf_formulation(network::Dict, pc_path::String, mip_optimizer, nlp_optimizer, breakpoint_function!::Function; use_pwlrd::Bool = true)
+    # Parse the network data.
+    network_mn = WM.make_multinetwork(network)
+
+    # Solve a continuously-relaxed version of the problem.
+    wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
+    result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
+
+    # Set the breakpoints to be used for nonlinear functions.
+    breakpoint_function!(network_mn, result_micp)
+    wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = use_pwlrd)
+    
+    pairwise_cuts = load_pairwise_cuts(pc_path)
+    add_pairwise_cuts(wm_master, pairwise_cuts)
+    add_pump_volume_cuts!(wm_master)
 
     # Solve the model and return the result.
     return WM.optimize_model!(wm_master; relax_integrality = false)
