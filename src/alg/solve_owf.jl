@@ -48,7 +48,7 @@ end
 
 function construct_owf_model(network_mn::Dict{String, Any}, owf_optimizer; use_pwlrd::Bool = true, kwargs...)
     # Specify model options and construct the multinetwork OWF model.
-    model_type = use_pwlrd ? WM.PWLRDWaterModel : WM.LRDXWaterModel
+    model_type = use_pwlrd ? WM.PWLRDWaterModel : LRDXWaterModel
     wm = WM.instantiate_model(network_mn, model_type, WM.build_mn_owf)
 
     # Set the optimizer and other important solver parameters.
@@ -179,7 +179,7 @@ function solve_owf_formulation(network::Dict, pc_path::String, mip_optimizer, nl
     # Set the breakpoints to be used for nonlinear functions.
     breakpoint_function!(network_mn, result_micp)
     wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = use_pwlrd)
-    
+
     pairwise_cuts = load_pairwise_cuts(pc_path)
     add_pairwise_cuts(wm_master, pairwise_cuts)
     add_pump_volume_cuts!(wm_master)
