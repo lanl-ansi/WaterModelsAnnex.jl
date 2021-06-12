@@ -253,18 +253,17 @@ end
 function constraint_on_off_pump_flow_nonlinear(
     wm::AbstractLRDXModel, n::Int, a::Int, node_fr::Int,
     node_to::Int, coeffs::Array{Float64, 1}, q_min_forward::Float64)
-    # Get the number of breakpoints for the pump.
-    num_breakpoints = get(wm.ext, :pump_breakpoints, 1)
+    # Get object from the WaterModels reference dictionary.
+    pump = WM.ref(wm, n, :pump, a)
 
     # Get the variable for pump status.
     z = WM.var(wm, n, :z_pump, a)
 
     # Get variables for positive flow and head difference.
     qp, qp_nl = WM.var(wm, n, :qp_pump, a), WM.var(wm, n, :qp_nl_pump, a)
-    qp_min_forward, qp_ub = max(0.0, q_min_forward), JuMP.upper_bound(qp)
 
     # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in range(qp_min_forward, stop = qp_ub, length = num_breakpoints)
+    for pt in WM.get_pump_flow_upper_breakpoints_positive(pump)
         # Add a linear outer approximation of the convex relaxation at `pt`.
         rhs = _calc_pump_flow_integrated_oa(qp, z, pt, coeffs)
 
@@ -275,19 +274,22 @@ function constraint_on_off_pump_flow_nonlinear(
         append!(WM.con(wm, n, :on_off_pump_flow_nonlinear)[a], [c])
     end
 
-    if qp_min_forward < qp_ub
-        lhs = _calc_pump_flow_integrated_bound(qp, z, qp_min_forward, qp_ub, coeffs)
-        c = JuMP.@constraint(wm.model, lhs <= qp_nl)
-        append!(WM.con(wm, n, :on_off_pump_flow_nonlinear)[a], [c])
-    end
+    # Add a constraint that lower-bounds the head gain variable.
+    lambda, g = WM.var(wm, n, :lambda_pump), WM.var(wm, n, :g_pump, a)
+    head_curve_function = WM._calc_head_curve_function(pump)
+    breakpoints = WM.get_pump_flow_lower_breakpoints_positive(pump)
+    f_all = head_curve_function.(collect(breakpoints))
+    gain_lb_expr = sum(f_all[k] .* lambda[a, k] for k in 1:length(breakpoints))
+    c = JuMP.@constraint(wm.model, gain_lb_expr <= g)
+    append!(WM.con(wm, n, :on_off_pump_flow_nonlinear)[a], [c])
 end
 
 
 function constraint_on_off_pump_gain_nonlinear(
     wm::AbstractLRDXModel, n::Int, a::Int, node_fr::Int,
     node_to::Int, coeffs::Array{Float64, 1}, q_min_forward::Float64)
-    # Get the number of breakpoints for the pump.
-    num_breakpoints = get(wm.ext, :pump_breakpoints, 1)
+    # Get object from the WaterModels reference dictionary.
+    pump = WM.ref(wm, n, :pump, a)
  
     # Get the variable for pump status.
     z = WM.var(wm, n, :z_pump, a)
@@ -295,10 +297,9 @@ function constraint_on_off_pump_gain_nonlinear(
     # Get variables for positive flow and head difference.
     g = WM.var(wm, n, :g_pump, a)
     g_nl = WM.var(wm, n, :g_nl_pump, a)
-    g_lb, g_ub = 0.0, JuMP.upper_bound(g)
 
     # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in range(g_lb, stop = g_ub, length = num_breakpoints)
+    for pt in WM.get_pump_head_gain_upper_breakpoints_positive(pump)
         # Add a linear outer approximation of the convex relaxation at `pt`.
         lhs = _calc_pump_gain_integrated_oa(g, z, pt, coeffs)
 
@@ -309,11 +310,22 @@ function constraint_on_off_pump_gain_nonlinear(
         append!(WM.con(wm, n, :on_off_pump_gain_nonlinear)[a], [c])
     end
 
-    if g_lb < g_ub
-        rhs = _calc_pump_gain_integrated_bound(g, z, g_lb, g_ub, coeffs)
-        c = JuMP.@constraint(wm.model, g_nl <= rhs)
-        append!(WM.con(wm, n, :on_off_pump_gain_nonlinear)[a], [c])
+    # Add a constraint that lower-bounds the head gain variable.
+    lambda, f_all = WM.var(wm, n, :lambda_pump), Vector{Float64}([])
+    breakpoints = WM.get_pump_head_gain_lower_breakpoints_positive(pump)
+
+    for g_hat in breakpoints
+        push!(f_all, ((-sqrt(-4.0 * coeffs[1] * coeffs[3] + 4.0 * coeffs[1] * g_hat + coeffs[2]^2) -
+            coeffs[2])^3 / (24.0 * coeffs[1]^2) + (coeffs[2] * (-sqrt(-4.0 * coeffs[1] * coeffs[3] + 4.0 *
+            coeffs[1] * g_hat + coeffs[2]^2) - coeffs[2])^2) / (8.0 * coeffs[1]^2) + (coeffs[3] *
+            (-sqrt(-4.0 * coeffs[1] * coeffs[3] + 4.0 * coeffs[1] * g_hat + coeffs[2]^2) -
+            coeffs[2])) / (2.0 * coeffs[1]) - (g_hat * (-sqrt(-4.0 * coeffs[1] * coeffs[3] +
+            4.0 * coeffs[1] * g_hat + coeffs[2]^2) - coeffs[2])) / (2.0 * coeffs[1])))
     end
+
+    gain_lb_expr = sum(f_all[k] .* lambda[a, k] for k in 1:length(breakpoints))
+    c = JuMP.@constraint(wm.model, g_nl <= gain_lb_expr)
+    append!(WM.con(wm, n, :on_off_pump_flow_nonlinear)[a], [c])
 end
 
 
