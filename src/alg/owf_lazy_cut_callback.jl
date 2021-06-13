@@ -261,22 +261,36 @@ function simulate_master_solution(wm_master, wm_sim, setting, cb_data)
 end
 
 
+function get_control_settings_at_nw_cb(wm::WM.AbstractWaterModel, cb_data, nw::Int)
+    pump_vids = WM._VariableIndex.(nw, :pump, :z_pump, WM.ids(wm, nw, :pump))
+    valve_vids = WM._VariableIndex.(nw, :valve, :z_valve, WM.ids(wm, nw, :valve))
+    regulator_vids = WM._VariableIndex.(nw, :regulator, :z_regulator, WM.ids(wm, nw, :regulator))
+
+    vids = vcat(pump_vids, valve_vids, regulator_vids)
+    vars = WM._get_variable_from_index.(Ref(wm), vids)
+    vals = WM.JuMP.callback_value.(Ref(cb_data), vars)
+    return ControlSetting(nw, vids, vals)
+end
+
+
 function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, setting, optimizer, stats)
     wm_sim = _instantiate_cq_model(network, optimizer)
     network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
 
     return function callback_function(cb_data)
-        stats.time_elapsed += @elapsed cost, infeasible_nw =
-            simulate_master_solution(wm, wm_sim, setting, cb_data)
+        control_settings = get_control_settings_at_nw_cb.(Ref(wm), cb_data, network_ids)
+        stats.time_elapsed += @elapsed simulation_results =
+            simulate_control_settings_sequential(wm_sim, control_settings)
 
-        if infeasible_nw == network_ids[end] + 1
+        if any(x -> !x.feasible, simulation_results)
+            id_infeasible = findfirst(x -> !x.feasible, simulation_results)
+            nw_infeasible = network_ids[id_infeasible]
+            stats.time_elapsed += @elapsed add_feasibility_cut!(wm, cb_data, nw_infeasible)
             # WM.Memento.info(LOGGER, "Infeasible solution found at step $(infeasible_nw).")
-            stats.time_elapsed += @elapsed add_recovery_feasibility_cut!(wm, cb_data)
-        elseif infeasible_nw !== nothing
-            # WM.Memento.info(LOGGER, "Infeasible solution found at step $(infeasible_nw).")
-            stats.time_elapsed += @elapsed add_feasibility_cut!(wm, cb_data, infeasible_nw)
         else
-            WM.Memento.info(LOGGER, "Found feasible with cost $(cost).")
+            cost = sum(x.cost for x in simulation_results)
+            WM.Memento.info(LOGGER, "Found feasible solution with cost $(cost).")
+            stats.best_cost = cost < stats.best_cost ? cost : stats.best_cost
             # stats.time_elapsed += @elapsed add_objective_cut!(wm, cb_data, cost)
         end
 
@@ -288,11 +302,12 @@ end
 mutable struct CallbackStats
     time_elapsed::Float64
     num_calls::Int64
+    best_cost::Float64
 end
 
 
 function add_owf_lazy_cut_callback!(wm::WM.AbstractWaterModel, network, setting, optimizer)
-    callback_stats = CallbackStats(0.0, 0)
+    callback_stats = CallbackStats(0.0, 0, Inf)
     callback_function = get_owf_lazy_cut_callback(wm, network, setting, optimizer, callback_stats)
     WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), callback_function)
     return callback_stats
