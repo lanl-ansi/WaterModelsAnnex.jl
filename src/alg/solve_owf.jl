@@ -202,6 +202,9 @@ function solve_owf_upper_bounds(network::Dict, pc_path::String, mip_optimizer, n
     if formulation_type == 1
         set_breakpoints_piecewise_degree!(network_mn, result_micp)
         wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = false)
+        pairwise_cuts = load_pairwise_cuts(pc_path)
+        add_pairwise_cuts(wm_master, pairwise_cuts)
+        add_pump_volume_cuts!(wm_master)
     elseif formulation_type == 2
         set_breakpoints_oa!(network_mn, result_micp)
         wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = true)
@@ -214,11 +217,7 @@ function solve_owf_upper_bounds(network::Dict, pc_path::String, mip_optimizer, n
     wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
 
     # Add the lazy cut callback.
-    lazy_cut_stats = add_owf_lazy_cut_callback!(wm_master, network, control_settings[1], nlp_optimizer)
-
-    pairwise_cuts = load_pairwise_cuts(pc_path)
-    add_pairwise_cuts(wm_master, pairwise_cuts)
-    add_pump_volume_cuts!(wm_master)
+    lazy_cut_stats = add_owf_lazy_cut_callback!(wm_master, network, control_settings[1], nlp_optimizer)    
 
     # Solve the model and return the result.
     result = WM.optimize_model!(wm_master; relax_integrality = false)
