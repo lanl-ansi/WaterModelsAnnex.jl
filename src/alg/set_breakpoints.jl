@@ -35,26 +35,12 @@ function set_breakpoints_oa!(network_mn::Dict{String, <:Any}, result_mn::Dict{St
 
         for (i, pipe) in network["pipe"]
             flow_min, flow_max = pipe["flow_min"], pipe["flow_max"]
-
-            if abs(result["pipe"][i]["q"]) > 1.0e-4
-                flow_mid = max(flow_min, result["pipe"][i]["q"])
-            else
-                flow_mid = 0.5 * (flow_min + flow_max)
-            end
-
             pipe["flow_lower_breakpoints"] = range(flow_min, flow_max; length = 10)
             pipe["flow_upper_breakpoints"] = [flow_min, flow_max]
          end
 
          for (i, pump) in network["pump"]
-            flow_min, flow_max = pump["flow_min"], pump["flow_max"]
-            
-            if result["pump"][i]["q"] > 1.0e-4
-                flow_mid = max(pump["flow_min"], result["pump"][i]["q"])
-            else
-                flow_mid = 0.5 * (flow_max + flow_min)
-            end
-
+            flow_min, flow_max = pump["flow_min_forward"], pump["flow_max"]
             pump["flow_lower_breakpoints"] = [flow_min, flow_max]
             pump["flow_upper_breakpoints"] = range(flow_min, flow_max; length = 10)
         end
