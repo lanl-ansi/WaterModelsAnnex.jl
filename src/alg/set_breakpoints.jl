@@ -139,7 +139,8 @@ function set_breakpoints_piecewise_degree!(network_mn::Dict{String, <:Any}, resu
                 flow_min_mid = 0.5 * (flow_mid + flow_min)
                 flow_max_mid = 0.5 * (flow_max + flow_mid)
 
-                pipe["flow_lower_breakpoints"] = [flow_min, flow_mid, flow_max]
+                pipe["flow_lower_breakpoints"] = [flow_min,
+                    flow_min_mid, flow_mid, flow_max_mid, flow_max]
                 pipe["flow_upper_breakpoints"] = [flow_min, flow_max]
             end
         end

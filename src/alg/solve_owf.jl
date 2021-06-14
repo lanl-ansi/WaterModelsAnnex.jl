@@ -189,7 +189,7 @@ function solve_owf_formulation(network::Dict, pc_path::String, mip_optimizer, nl
 end
 
 
-function solve_owf_lrdx(network::Dict, pc_path::String, mip_optimizer, nlp_optimizer, breakpoint_function!::Function)
+function solve_owf_upper_bounds(network::Dict, pc_path::String, mip_optimizer, nlp_optimizer, formulation_type::Int)
     # Parse the network data.
     network_mn = WM.make_multinetwork(network)
 
@@ -199,8 +199,16 @@ function solve_owf_lrdx(network::Dict, pc_path::String, mip_optimizer, nlp_optim
     control_settings = get_control_settings_from_result(result_micp)
 
     # Set the breakpoints to be used for nonlinear functions.
-    breakpoint_function!(network_mn, result_micp)
-    wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = false)
+    if formulation_type == 1
+        set_breakpoints_piecewise_degree!(network_mn, result_micp)
+        wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = false)
+    elseif formulation_type == 2
+        set_breakpoints_oa!(network_mn, result_micp)
+        wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = false)
+        binary_vars = filter(v -> JuMP.is_binary(v), JuMP.all_variables(wm_master.model))
+        binary_vars_y = filter(v -> occursin("_y", JuMP.name(v)), binary_vars)
+        map(x -> JuMP.unset_binary(x), binary_vars_y)
+    end
 
     # TODO: Remove this once Gurobi.jl interface is fixed.
     wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
