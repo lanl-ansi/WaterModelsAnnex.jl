@@ -204,7 +204,7 @@ function solve_owf_upper_bounds(network::Dict, pc_path::String, mip_optimizer, n
         wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = false)
     elseif formulation_type == 2
         set_breakpoints_oa!(network_mn, result_micp)
-        wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = false)
+        wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = true)
         binary_vars = filter(v -> JuMP.is_binary(v), JuMP.all_variables(wm_master.model))
         binary_vars_y = filter(v -> occursin("_y", JuMP.name(v)), binary_vars)
         map(x -> JuMP.unset_binary(x), binary_vars_y)
