@@ -225,6 +225,33 @@ function solve_owf_upper_bounds(network::Dict, pc_path::String, mip_optimizer, n
 end
 
 
+function solve_owf_upper_bounds_no_cb(network::Dict, pc_path::String, mip_optimizer, nlp_optimizer, formulation_type::Int)
+    # Parse the network data.
+    network_mn = WM.make_multinetwork(network)
+
+    # Solve a continuously-relaxed version of the problem.
+    wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
+    result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
+    control_settings = get_control_settings_from_result(result_micp)
+
+    # Set the breakpoints to be used for nonlinear functions.
+    if formulation_type == 1
+        set_breakpoints_piecewise_degree!(network_mn, result_micp)
+        wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = false)
+        pairwise_cuts = load_pairwise_cuts(pc_path)
+        add_pairwise_cuts(wm_master, pairwise_cuts)
+        add_pump_volume_cuts!(wm_master)
+    elseif formulation_type == 2
+        set_breakpoints_oa!(network_mn, result_micp)
+        wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = true)
+        WM._relax_all_direction_variables!(wm_master)
+    end
+
+    # Solve the model and return the result.
+    return WM.optimize_model!(wm_master; relax_integrality = false)
+end
+
+
 function solve_pairwise_cuts(network::Dict, optimizer)
     WM.Memento.info(LOGGER, "Beginning cut preprocessing routine.")
     set_breakpoints_num!(network, 10)
