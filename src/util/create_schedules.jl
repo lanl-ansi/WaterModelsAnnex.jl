@@ -282,10 +282,17 @@ function set_demands!(wm::AbstractCQModel)
 end
 
 
+function set_warm_start_loose!(wm::AbstractCQModel)
+    vars = JuMP.all_variables(wm.model)
+    JuMP.set_start_value.(vars, 1.0e-6)
+end
+
+
 function simulate_control_setting(wm::AbstractCQModel, control_setting::ControlSetting)::SimulationResult
     WM._IM.load_timepoint!(wm.data, control_setting.network_id)
     set_tank_heads!(wm); set_reservoir_heads!(wm); set_demands!(wm);
     set_parameters_from_control_setting!(wm, control_setting)
+    set_warm_start_loose!(wm)
     JuMP.optimize!(wm.model)
     return build_simulation_result(wm)
 end
@@ -383,7 +390,7 @@ function simulate_control_settings_sequential(wm::AbstractCQModel, control_setti
         push!(simulation_results, simulation_result)
 
         if !simulation_result.feasible
-             return simulation_results
+            return simulation_results
         end
     end
 

@@ -5,8 +5,8 @@ function WM.variable_flow(wm::AbstractCQModel; nw::Int = WM._IM.nw_id_default, b
         WM._variable_component_flow(wm, name; nw = nw, bounded = bounded, report = report)
     end
 
-    JuMP.set_upper_bound.(WM.var(wm, nw, :qn_pump), 0.0)
-    JuMP.set_upper_bound.(WM.var(wm, nw, :qn_regulator), 0.0)
+    JuMP.fix.(WM.var(wm, nw, :qn_pump), 0.0; force = true)
+    JuMP.fix.(WM.var(wm, nw, :qn_regulator), 0.0; force = true)
 end
 
 
@@ -240,76 +240,6 @@ function objective_strong_duality(wm::AbstractCQModel)
                 z_pump[a] * 0.5 * c[2] * qp_pump[a]^2 +
                 z_pump[a] * c[3] * qp_pump[a]))
         end
-
-        # for (i, res) in WM.ref(wm, n, :reservoir)
-        #     for comp in [:des_pipe, :pipe, :pump, :regulator, :short_pipe, :valve]
-        #         qp = WM.var(wm, n, Symbol("qp_" * string(comp)))
-        #         qn = WM.var(wm, n, Symbol("qn_" * string(comp)))
-
-        #         if comp in [:des_pipe, :pump, :regulator, :valve]
-        #             z_sym = Symbol("z_" * string(comp))
-
-        #             for a in WM.ref(wm, n, Symbol(string(comp) * "_fr"), res["node"])                        
-        #                 reservoir_head_times_flow = JuMP.@NLexpression(
-        #                     wm.model, h_reservoir[res["node"]] * wm.model[z_sym][a] * (qp[a] - qn[a]))
-        #                 push!(f_2, JuMP.@NLexpression(wm.model, reservoir_head_times_flow))
-        #             end
-    
-        #             for a in WM.ref(wm, n, Symbol(string(comp) * "_to"), res["node"])
-        #                 reservoir_head_times_flow = JuMP.@NLexpression(
-        #                     wm.model, h_reservoir[res["node"]] * wm.model[z_sym][a] * (qn[a] - qp[a]))
-        #                 push!(f_2, JuMP.@NLexpression(wm.model, reservoir_head_times_flow))
-        #             end
-        #         else
-        #             for a in WM.ref(wm, n, Symbol(string(comp) * "_fr"), res["node"])
-        #                 reservoir_head_times_flow = JuMP.@NLexpression(
-        #                     wm.model, h_reservoir[res["node"]] * (qp[a] - qn[a]))
-        #                 push!(f_2, JuMP.@NLexpression(wm.model, reservoir_head_times_flow))
-        #             end
-
-        #             for a in WM.ref(wm, n, Symbol(string(comp) * "_to"), res["node"])
-        #                 reservoir_head_times_flow = JuMP.@NLexpression(
-        #                     wm.model, h_reservoir[res["node"]] * (qn[a] - qp[a]))
-        #                 push!(f_2, JuMP.@NLexpression(wm.model, reservoir_head_times_flow))
-        #             end
-        #         end
-        #     end
-        # end
-
-        # for (i, tank) in WM.ref(wm, n, :tank)
-        #     for comp in [:des_pipe, :pipe, :pump, :regulator, :short_pipe, :valve]
-        #         qp = WM.var(wm, n, Symbol("qp_" * string(comp)))
-        #         qn = WM.var(wm, n, Symbol("qn_" * string(comp)))
-
-        #         if comp in [:des_pipe, :pump, :regulator, :valve]
-        #             z_sym = Symbol("z_" * string(comp))
-
-        #             for a in WM.ref(wm, n, Symbol(string(comp) * "_fr"), tank["node"])                        
-        #                 tank_head_times_flow = JuMP.@NLexpression(
-        #                     wm.model, h_tank[tank["node"]] * wm.model[z_sym][a] * (qp[a] - qn[a]))
-        #                 push!(f_2, JuMP.@NLexpression(wm.model, tank_head_times_flow))
-        #             end
-    
-        #             for a in WM.ref(wm, n, Symbol(string(comp) * "_to"), tank["node"])
-        #                 tank_head_times_flow = JuMP.@NLexpression(
-        #                     wm.model, h_tank[tank["node"]] * wm.model[z_sym][a] * (qn[a] - qp[a]))
-        #                 push!(f_2, JuMP.@NLexpression(wm.model, tank_head_times_flow))
-        #             end
-        #         else
-        #             for a in WM.ref(wm, n, Symbol(string(comp) * "_fr"), tank["node"])
-        #                 tank_head_times_flow = JuMP.@NLexpression(
-        #                     wm.model, h_tank[tank["node"]] * (qp[a] - qn[a]))
-        #                 push!(f_2, JuMP.@NLexpression(wm.model, tank_head_times_flow))
-        #             end
-
-        #             for a in WM.ref(wm, n, Symbol(string(comp) * "_to"), tank["node"])
-        #                 tank_head_times_flow = JuMP.@NLexpression(
-        #                     wm.model, h_tank[tank["node"]] * (qn[a] - qp[a]))
-        #                 push!(f_2, JuMP.@NLexpression(wm.model, tank_head_times_flow))
-        #             end
-        #         end
-        #     end
-        # end
 
         for (i, tank) in WM.ref(wm, n, :tank)
            push!(f_2, JuMP.@NLexpression(wm.model,
