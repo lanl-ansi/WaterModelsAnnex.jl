@@ -4,6 +4,7 @@ import BlockDecomposition
 import Coluna
 import Gurobi
 import JuMP
+import PolyhedralRelaxations
 import WaterModels
 import LightGraphs
 

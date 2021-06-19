@@ -91,78 +91,42 @@ function set_breakpoints_piecewise!(network_mn::Dict{String, <:Any}, result_mn::
 end
 
 
-function set_breakpoints_accuracy!(data::Dict{String, <:Any}, outer_accuracy::Float64, inner_accuracy::Float64)
+function set_breakpoints_accuracy!(data::Dict{String, <:Any}, error_tolerance::Float64, length_tolerance::Float64)
     head_loss, viscosity = data["head_loss"], data["viscosity"]
     base_length = get(data, "base_length", 1.0)
     base_time = get(data, "base_time", 1.0)
     exponent = uppercase(head_loss) == "H-W" ? 1.852 : 2.0
 
     for pipe in values(data["pipe"])
-        node_fr = data["node"][string(pipe["node_fr"])]
-        node_to = data["node"][string(pipe["node_to"])]
+        L_x_r = pipe["length"] * WM._calc_pipe_resistance(
+            pipe, head_loss, viscosity, base_length, base_time)
 
-        dh_min = node_fr["head_min"] - node_to["head_max"]
-        dh_max = node_fr["head_max"] - node_to["head_min"]
+        f = x -> L_x_r * sign(x) * abs(x)^exponent
+        f_dash = x -> exponent * L_x_r * (x * x)^(0.5 * exponent - 0.5)
+        partition = Vector{Float64}([pipe["flow_min"], pipe["flow_max"]])
 
-        r = WM._calc_pipe_resistance(pipe, head_loss,
-             viscosity, base_length, base_time)
-
-        if dh_max > dh_min && dh_max - dh_min > outer_accuracy
-            dh_range_outer = range(dh_min, dh_max, step = outer_accuracy)
-            q_range_outer = sign.(dh_range_outer) .* (abs.(dh_range_outer) ./
-                (pipe["length"] * r)).^(1.0 / exponent)
-            q_range_outer = filter(x -> pipe["flow_min"] < x &&
-                x < pipe["flow_max"], q_range_outer)
-            pipe["flow_lower_breakpoints"] = sort(vcat(q_range_outer,
-                [pipe["flow_min"], pipe["flow_max"]]))
-        else
-            pipe["flow_lower_breakpoints"] = [pipe["flow_min"], pipe["flow_max"]]
-        end
-
-        if dh_max > dh_min && dh_max - dh_min > inner_accuracy
-            dh_range_outer = range(dh_min, dh_max, step = inner_accuracy)
-            q_range_outer = sign.(dh_range_outer) .* (abs.(dh_range_outer) ./
-                (pipe["length"] * r)).^(1.0 / exponent)
-            q_range_outer = filter(x -> pipe["flow_min"] < x &&
-                x < pipe["flow_max"], q_range_outer)
-            pipe["flow_upper_breakpoints"] = sort(vcat(q_range_outer,
-                [pipe["flow_min"], pipe["flow_max"]]))
-        else
-            pipe["flow_upper_breakpoints"] = [pipe["flow_min"], pipe["flow_max"]]
-        end
+        uvf_data = PolyhedralRelaxations.UnivariateFunctionData(
+            f, f_dash, partition, error_tolerance,
+            length_tolerance, 1.0e-6, 9e9, 0)
+        
+        PolyhedralRelaxations._refine_partition!(uvf_data)
+        pipe["flow_lower_breakpoints"] = uvf_data.partition
+        pipe["flow_upper_breakpoints"] = uvf_data.partition
     end
 
     for pump in values(data["pump"])
-        node_fr = data["node"][string(pump["node_fr"])]
-        node_to = data["node"][string(pump["node_to"])]
+        f = WM._calc_head_curve_function(pump)
+        f_dash = WM._calc_head_curve_derivative(pump)
+        partition = Vector{Float64}([pump["flow_min_forward"], pump["flow_max"]])
 
-        dh_min = node_fr["head_min"] - node_to["head_max"]
-        dh_max = node_fr["head_max"] - node_to["head_min"]
-
-        #if dh_max > dh_min && dh_max - dh_min > outer_accuracy
-        #    dh_range_outer = range(dh_min, dh_max, step = outer_accuracy)
-        #    q_range_outer = sign.(dh_range_outer) .* (abs.(dh_range_outer) ./
-        #        (pipe["length"] * r)).^(1.0 / exponent)
-        #    q_range_outer = filter(x -> pipe["flow_min"] < x &&
-        #        x < pipe["flow_max"], q_range_outer)
-        #    pipe["flow_lower_breakpoints"] = sort(vcat(q_range_outer,
-        #        [pipe["flow_min"], pipe["flow_max"]]))
-        #else
-        #    pipe["flow_lower_breakpoints"] = [pipe["flow_min"], pipe["flow_max"]]
-        #end
-
-        #if dh_max > dh_min && dh_max - dh_min > inner_accuracy
-        #    dh_range_outer = range(dh_min, dh_max, step = inner_accuracy)
-        #    q_range_outer = sign.(dh_range_outer) .* (abs.(dh_range_outer) ./
-        #        (pipe["length"] * r)).^(1.0 / exponent)
-        #    q_range_outer = filter(x -> pipe["flow_min"] < x &&
-        #        x < pipe["flow_max"], q_range_outer)
-        #    pipe["flow_upper_breakpoints"] = sort(vcat(q_range_outer,
-        #        [pipe["flow_min"], pipe["flow_max"]]))
-        #else
-        #    pipe["flow_upper_breakpoints"] = [pipe["flow_min"], pipe["flow_max"]]
-        #end
-    end
+        uvf_data = PolyhedralRelaxations.UnivariateFunctionData(
+            f, f_dash, partition, error_tolerance,
+            length_tolerance, 1.0e-6, 9e9, 0)
+        
+        PolyhedralRelaxations._refine_partition!(uvf_data)
+        pump["flow_lower_breakpoints"] = uvf_data.partition
+        pump["flow_upper_breakpoints"] = uvf_data.partition
+    end 
 end
 
 
