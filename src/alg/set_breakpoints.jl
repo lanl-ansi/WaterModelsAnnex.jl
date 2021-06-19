@@ -131,6 +131,38 @@ function set_breakpoints_accuracy!(data::Dict{String, <:Any}, outer_accuracy::Fl
             pipe["flow_upper_breakpoints"] = [pipe["flow_min"], pipe["flow_max"]]
         end
     end
+
+    for pump in values(data["pump"])
+        node_fr = data["node"][string(pump["node_fr"])]
+        node_to = data["node"][string(pump["node_to"])]
+
+        dh_min = node_fr["head_min"] - node_to["head_max"]
+        dh_max = node_fr["head_max"] - node_to["head_min"]
+
+        #if dh_max > dh_min && dh_max - dh_min > outer_accuracy
+        #    dh_range_outer = range(dh_min, dh_max, step = outer_accuracy)
+        #    q_range_outer = sign.(dh_range_outer) .* (abs.(dh_range_outer) ./
+        #        (pipe["length"] * r)).^(1.0 / exponent)
+        #    q_range_outer = filter(x -> pipe["flow_min"] < x &&
+        #        x < pipe["flow_max"], q_range_outer)
+        #    pipe["flow_lower_breakpoints"] = sort(vcat(q_range_outer,
+        #        [pipe["flow_min"], pipe["flow_max"]]))
+        #else
+        #    pipe["flow_lower_breakpoints"] = [pipe["flow_min"], pipe["flow_max"]]
+        #end
+
+        #if dh_max > dh_min && dh_max - dh_min > inner_accuracy
+        #    dh_range_outer = range(dh_min, dh_max, step = inner_accuracy)
+        #    q_range_outer = sign.(dh_range_outer) .* (abs.(dh_range_outer) ./
+        #        (pipe["length"] * r)).^(1.0 / exponent)
+        #    q_range_outer = filter(x -> pipe["flow_min"] < x &&
+        #        x < pipe["flow_max"], q_range_outer)
+        #    pipe["flow_upper_breakpoints"] = sort(vcat(q_range_outer,
+        #        [pipe["flow_min"], pipe["flow_max"]]))
+        #else
+        #    pipe["flow_upper_breakpoints"] = [pipe["flow_min"], pipe["flow_max"]]
+        #end
+    end
 end
 
 
