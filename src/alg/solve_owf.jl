@@ -254,7 +254,7 @@ end
 
 function solve_pairwise_cuts(network::Dict, optimizer)
     WM.Memento.info(LOGGER, "Beginning cut preprocessing routine.")
-    set_breakpoints_num!(network, 10)
+    set_breakpoints_num!(network, 10, 10)
     cut_time = @elapsed pairwise_cuts = compute_pairwise_cuts(network, optimizer)
     WM.Memento.info(LOGGER, "Pairwise cut preprocessing completed in $(cut_time) seconds.")
     return pairwise_cuts
