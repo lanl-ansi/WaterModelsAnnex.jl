@@ -227,7 +227,7 @@ end
 
 function solve_owf_upper_bounds_bp(network::Dict, pc_path::String, mip_optimizer, nlp_optimizer, error_tolerance::Float64)
     # Parse the network data.
-    set_breakpoints!(network, error_tolerance, 1.0e-4)
+    WM.set_breakpoints!(network, error_tolerance, 1.0e-4)
     network_mn = WM.make_multinetwork(network)
 
     # Solve a continuously-relaxed version of the problem.
