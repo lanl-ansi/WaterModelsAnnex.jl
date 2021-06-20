@@ -225,6 +225,39 @@ function solve_owf_upper_bounds(network::Dict, pc_path::String, mip_optimizer, n
 end
 
 
+function solve_owf_upper_bounds_bp(network::Dict, pc_path::String, mip_optimizer, nlp_optimizer, error_tolerance::Float64)
+    # Parse the network data.
+    set_breakpoints!(network, error_tolerance, 1.0e-4)
+    network_mn = WM.make_multinetwork(network)
+
+    # Solve a continuously-relaxed version of the problem.
+    wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
+    result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
+    control_settings = get_control_settings_from_result(result_micp)
+
+    # Set the breakpoints to be used for nonlinear functions.
+    wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = false)
+    pairwise_cuts = load_pairwise_cuts(pc_path)
+    add_pairwise_cuts(wm_master, pairwise_cuts)
+    add_pump_volume_cuts!(wm_master)
+
+    # TODO: Remove this once Gurobi.jl interface is fixed.
+    wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
+
+    # Add the lazy cut callback.
+    lazy_cut_stats = add_owf_lazy_cut_callback!(
+        wm_master, network, control_settings[1], nlp_optimizer)    
+
+    # Solve the model and return the result.
+    result = WM.optimize_model!(wm_master; relax_integrality = false)
+    result["true_upper_bound"] = lazy_cut_stats.best_cost
+    result["true_gap"] = (result["true_upper_bound"] -
+        result["objective_lb"]) / result["true_upper_bound"]
+
+    return result
+end
+
+
 function solve_owf_upper_bounds_no_cb(network::Dict, pc_path::String, mip_optimizer, nlp_optimizer, formulation_type::Int)
     # Parse the network data.
     network_mn = WM.make_multinetwork(network)
