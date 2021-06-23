@@ -300,7 +300,17 @@ function run_heuristic(
     add_pump_volume_cuts!(wm)
 
     wm_cq = _instantiate_cq_model(network, nlp_optimizer)
-    return run_sequential_heuristic(wm, wm_cq, result_micp, time_limit)
+    control_settings = run_sequential_heuristic(wm, wm_cq, result_micp, time_limit)
+    
+    if control_settings !== nothing
+        results = simulate_control_settings_sequential(wm_cq, control_settings)
+        is_feasible = all(x -> x.feasible, results)
+        total_cost = sum(x.cost for x in results)
+        WM.Memento.info(LOGGER, "[HEUR] Found heuristic solution, feasibility $(is_feasible).") 
+        WM.Memento.info(LOGGER, "[HEUR] Found heuristic solution, cost $(total_cost).")
+    end
+
+    return control_settings
 end
 
 
