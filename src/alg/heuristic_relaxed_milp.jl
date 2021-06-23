@@ -188,8 +188,26 @@ function add_feasibility_cut_from_control_settings!(wm::WM.AbstractWaterModel, c
 
     one_vars = vars[findall(x -> round(x) == 1.0, vals)]
     zero_vars = vars[findall(x -> round(x) == 0.0, vals)]
-    JuMP.@constraint(wm.model, sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
+    JuMP.@constraint(wm.model, sum(zero_vars) -
+        sum(one_vars) >= 1.0 - length(one_vars))
 end
+
+
+function objective_mean_tank_levels(wm::WM.AbstractWaterModel)
+    objective = JuMP.AffExpr(0.0)
+
+    for nw in sort(collect(WM.nw_ids(wm)))
+        for tank in values(WM.ref(wm, nw, :tank))
+            node = WM.ref(wm, nw, :node, tank["node"])
+            h = WM.var(wm, nw, :h, tank["node"])
+            head_mid = 0.5 * (node["head_min"] + node["head_max"])
+            objective += (h - head_mid)^2
+        end
+    end
+
+    JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
+end
+
 
 function solve_pseudo_relaxation_nw(wm::WM.AbstractWaterModel, nws::Vector{Int})
     nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
@@ -208,15 +226,18 @@ function solve_pseudo_relaxation_nw(wm::WM.AbstractWaterModel, nws::Vector{Int})
 end
 
 
-function run_sequential_heuristic(wm::WM.AbstractWaterModel, wm_cq::CQWaterModel, result_micp::Dict{String, <:Any}, mip_optimizer, nlp_optimizer)
+function run_sequential_heuristic(
+    wm::WM.AbstractWaterModel, wm_cq::CQWaterModel,
+    result_micp::Dict{String, <:Any}, time_limit::Float64)
     control_settings = get_control_settings_from_result(result_micp)
     map(x -> x.vals = round.(x.vals), control_settings)
     nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
-    num_iterations = 0
+    time_elapsed = 0.0
 
-    while num_iterations <= 25
+    while time_elapsed < time_limit
         # Simulate the current control schedule forward in time.
-        simulation_results = simulate_control_settings_sequential(wm_cq, control_settings)
+        time_elapsed += @elapsed simulation_results =
+            simulate_control_settings_sequential(wm_cq, control_settings)
 
         # If the control schedule is feasible...
         if all(x -> x.feasible, simulation_results)
@@ -225,9 +246,11 @@ function run_sequential_heuristic(wm::WM.AbstractWaterModel, wm_cq::CQWaterModel
         else # If the control schedule is not feasible...
             # Get the set of times at and before the infeasibility.
             nws_infeasible = nw_ids[1:length(simulation_results)]
+            WM.Memento.info(LOGGER, "[HEUR] Feasible time indices: $(nws_infeasible).")
 
             # Add a feasibility cut to the WaterModels model up to this time.
-            add_feasibility_cut_from_control_settings!(wm, control_settings[nws_infeasible])
+            add_feasibility_cut_from_control_settings!(
+                wm, control_settings[nws_infeasible])
 
             # Pick a random time index at which the controls will be updated.
             num_choose = min(length(nws_infeasible), 1)
@@ -239,37 +262,62 @@ function run_sequential_heuristic(wm::WM.AbstractWaterModel, wm_cq::CQWaterModel
  
             # Fix the controls prior to this time step.
             nws_fixed = nw_ids[1:nws_random[end]-1]
-            fix_control_setting!.(Ref(wm), control_settings[nws_fixed], simulation_results[nws_fixed])
+            fix_control_setting!.(Ref(wm), control_settings[nws_fixed],
+                simulation_results[nws_fixed])
 
             # Solve the corresponding pseudo-relaxation at the random time.
-            result = solve_pseudo_relaxation_nw(wm, nws_random)
+            time_elapsed += @elapsed result =
+                solve_pseudo_relaxation_nw(wm, nws_random)
 
             if result["primal_status"] === WM._MOI.FEASIBLE_POINT
                 control_settings = get_control_settings_from_result(result)
                 map(x -> x.vals = round.(x.vals), control_settings)
             else
-                add_feasibility_cut_from_control_settings!(wm, control_settings[nws_infeasible])
+                add_feasibility_cut_from_control_settings!(
+                    wm, control_settings[nws_infeasible])
             end
         end
-
-        num_iterations += 1
     end
 
+    WM.Memento.info(LOGGER, "[HEUR] Could not find a heuristic solution.")
     return nothing
 end
 
 
-function run_heuristic(network::Dict{String, Any}, mip_optimizer, nlp_optimizer)
+function run_heuristic(
+    network_mn::Dict{String, <:Any}, network::Dict{String, <:Any},
+    pc_path::String, mip_optimizer, nlp_optimizer, time_limit::Float64)
+    WM.set_breakpoints!(network, 0.25, 1.0e-4)
+    wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
+    result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
+
+    wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf)
+    WM.JuMP.set_optimizer(wm.model, mip_optimizer)
+    pairwise_cuts = load_pairwise_cuts(pc_path)
+    add_pairwise_cuts(wm, pairwise_cuts)
+
+    objective_mean_tank_levels(wm)
+    add_pump_volume_cuts!(wm)
+
+    wm_cq = _instantiate_cq_model(network, nlp_optimizer)
+    return run_sequential_heuristic(wm, wm_cq, result_micp, time_limit)
+end
+
+
+function run_heuristic(network::Dict{String, Any}, mip_optimizer, nlp_optimizer, time_limit::Float64)
+    set_breakpoints_accuracy!(network, 0.25, 1.0e-4)
     network_mn = WM.make_multinetwork(network)
     wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
     result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
 
-    set_breakpoints_heuristic!(network_mn, result_micp)
     wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf)
     WM.JuMP.set_optimizer(wm.model, mip_optimizer)
 
+    objective_mean_tank_levels(wm)
+    add_pump_volume_cuts!(wm)
+
     wm_cq = _instantiate_cq_model(network, nlp_optimizer)
-    return run_sequential_heuristic(wm, wm_cq, result_micp, mip_optimizer, nlp_optimizer)
+    return run_sequential_heuristic(wm, wm_cq, result_micp, time_limit)
 
     # # Specify model options and construct the multinetwork OWF model.
     # wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf)
