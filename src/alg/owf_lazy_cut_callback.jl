@@ -197,6 +197,31 @@ function _get_direction_variables_to_nw(wm::WM.AbstractWaterModel, nw_last::Int)
 end
 
 
+function _get_tank_direction_variables_to_nw(wm::WM.AbstractWaterModel, nw_last::Int)
+    vars = Array{WM.JuMP.VariableRef, 1}()
+    network_ids = sort(collect(WM.nw_ids(wm)))[1:nw_last]
+
+    for nw_id in network_ids
+        for (i, tank) in WM.ref(wm, nw_id, :tank)
+            for var_name in ["pipe", "pump", "regulator", "short_pipe", "valve"]
+                fr_sym, to_sym = Symbol(var_name * "_fr"), Symbol(var_name * "_to")
+                fr_arcs = WM.ref(wm, nw_id, fr_sym, tank["node"])
+                to_arcs = WM.ref(wm, nw_id, to_sym, tank["node"])
+
+                var_sym = Symbol("y_" * var_name)
+                y_fr_vars = [WM.var(wm, nw_id, var_sym, a) for a in fr_arcs]
+                y_to_vars = [WM.var(wm, nw_id, var_sym, a) for a in to_arcs]
+                y_vars = vcat(y_fr_vars, y_to_vars)
+
+                append!(vars, y_vars)
+            end
+        end
+    end
+
+    return vars
+end
+
+
 function feasible_simulation_result(result::Dict{String, <:Any})
     #feasible_statuses = [WM._MOI.FEASIBLE_POINT, WM._MOI.NEARLY_FEASIBLE_POINT]
     status_is_feasible = result["primal_status"] === WM._MOI.FEASIBLE_POINT
@@ -208,7 +233,7 @@ end
 function add_feasibility_cut!(wm::WM.AbstractWaterModel, cb_data, nw_last::Int)    
     # Collect the current integer solution into "zero" and "one" buckets.
     z_vars = _get_indicator_variables_to_nw(wm, nw_last)
-    y_vars = _get_direction_variables_to_nw(wm, nw_last)
+    y_vars = _get_tank_direction_variables_to_nw(wm, nw_last)
     vars = vcat(z_vars, y_vars)
     
     zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
