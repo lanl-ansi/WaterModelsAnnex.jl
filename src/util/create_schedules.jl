@@ -92,7 +92,11 @@ function get_pipe_flow_expression(wm::AbstractCQModel, arc::Arc)::Float64
     q = JuMP.value(WM.var(wm, :q_pipe, arc.index))
     exponent, L = WM.ref(wm, :alpha), pipe["length"]
     head_loss, viscosity = wm.data["head_loss"], wm.data["viscosity"]
-    r = WM._calc_pipe_resistance(pipe, head_loss, viscosity, 1.0, 1.0)
+
+    data = WM.get_wm_data(wm.data)
+    base_length = get(data, "base_length", 1.0)
+    base_time = get(data, "base_time", 1.0)
+    r = WM._calc_pipe_resistance(pipe, head_loss, viscosity, base_length, base_time)
     return L * r * q * abs(q)^(exponent - 1.0)
 end
 

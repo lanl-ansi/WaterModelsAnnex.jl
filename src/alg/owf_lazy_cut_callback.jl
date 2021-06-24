@@ -268,7 +268,7 @@ function get_control_settings_at_nw_cb(wm::WM.AbstractWaterModel, cb_data, nw::I
 
     vids = vcat(pump_vids, valve_vids, regulator_vids)
     vars = WM._get_variable_from_index.(Ref(wm), vids)
-    vals = WM.JuMP.callback_value.(Ref(cb_data), vars)
+    vals = abs.(round.(WM.JuMP.callback_value.(Ref(cb_data), vars)))
     return ControlSetting(nw, vids, vals)
 end
 
@@ -287,28 +287,28 @@ function fix_nc_from_cb(wm_nc::WM.AbstractWaterModel, wm::WM.AbstractWaterModel,
     
     for nw in nw_ids[1:end-1]
         for (a, pump) in WM.ref(wm, nw, :pump)
+            z_cb_var = WM.var(wm, nw, :z_pump, a)
+            z_cb_val = round(WM.JuMP.callback_value(cb_data, z_cb_var))
+            z_nc_var = WM.var(wm_nc, nw, :z_pump, a)
+            JuMP.set_start_value(z_nc_var, z_cb_val)
+            JuMP.fix(z_nc_var, z_cb_val; force = true)
+
             g_cb_var = WM.var(wm, nw, :g_pump, a)
             g_nc_var = WM.var(wm_nc, nw, :g_pump, a)
             g_cb_val = WM.JuMP.callback_value(cb_data, g_cb_var)
-            JuMP.set_start_value(g_nc_var, g_cb_val)
+            JuMP.set_start_value(g_nc_var, z_cb_val * g_cb_val)
 
             P_cb_var = WM.var(wm, nw, :P_pump, a)
             P_nc_var = WM.var(wm_nc, nw, :P_pump, a)
             P_cb_val = WM.JuMP.callback_value(cb_data, P_cb_var)
-            JuMP.set_start_value(P_nc_var, P_cb_val)
+            JuMP.set_start_value(P_nc_var, z_cb_val * P_cb_val)
 
             qp_cb_var = WM.var(wm, nw, :qp_pump, a)
             qp_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qp_cb_var))
             qn_cb_var = WM.var(wm, nw, :qn_pump, a)
             qn_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qn_cb_var))
             q_nc_var = WM.var(wm_nc, nw, :q_pump, a)
-            JuMP.set_start_value(q_nc_var, qp_cb_val - qn_cb_val)
-
-            z_cb_var = WM.var(wm, nw, :z_pump, a)
-            z_cb_val = round(WM.JuMP.callback_value(cb_data, z_cb_var))
-            z_nc_var = WM.var(wm_nc, nw, :z_pump, a)
-            JuMP.set_start_value(z_nc_var, z_cb_val)
-            JuMP.fix(z_nc_var, z_cb_val; force = true)
+            JuMP.set_start_value(q_nc_var, z_cb_val * (qp_cb_val - qn_cb_val))
 
             if nw != nw_ids[1]
                 z_switch_on_cb_var = WM.var(wm, nw, :z_switch_on_pump, a)
@@ -361,7 +361,8 @@ function fix_nc_from_cb(wm_nc::WM.AbstractWaterModel, wm::WM.AbstractWaterModel,
             qn_cb_var = WM.var(wm, nw, :qn_pipe, a)
             qn_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qn_cb_var))
             q_nc_var = WM.var(wm_nc, nw, :q_pipe, a)
-            JuMP.set_start_value(q_nc_var, qp_cb_val - qn_cb_val)
+            start_val = abs(qp_cb_val - qn_cb_val) > 1.0e-6 ? qp_cb_val - qn_cb_val : 1.0e-6
+            JuMP.set_start_value(q_nc_var, start_val)
         end
 
         for (a, short_pipe) in WM.ref(wm, nw, :short_pipe)

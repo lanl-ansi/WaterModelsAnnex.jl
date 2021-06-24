@@ -178,8 +178,9 @@ end
 
 
 function objective_strong_duality(wm::AbstractCQModel)
-    base_length = get(wm.data, "base_length", 1.0)
-    base_time = get(wm.data, "base_time", 1.0)
+    wm_data = WM.get_wm_data(wm.data)
+    base_length = get(wm_data, "base_length", 1.0)
+    base_time = get(wm_data, "base_time", 1.0)
     alpha = WM._get_alpha_min_1(wm) + 1.0
     
     pipe_type = wm.ref[:it][WM.wm_it_sym][:head_loss]
