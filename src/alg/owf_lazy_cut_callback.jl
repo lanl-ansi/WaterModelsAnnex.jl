@@ -273,21 +273,155 @@ function get_control_settings_at_nw_cb(wm::WM.AbstractWaterModel, cb_data, nw::I
 end
 
 
+function fix_nc_from_cb(wm_nc::WM.AbstractWaterModel, wm::WM.AbstractWaterModel, cb_data)
+    nw_ids = sort(collect(WM.nw_ids(wm)))
+
+    for nw in nw_ids
+        for (i, node) in WM.ref(wm, nw, :node)
+            h_cb_var = WM.var(wm, nw, :h, i)
+            h_nc_var = WM.var(wm_nc, nw, :h, i)
+            h_cb_val = WM.JuMP.callback_value(cb_data, h_cb_var)
+            JuMP.set_start_value(h_nc_var, h_cb_val)
+        end
+    end
+    
+    for nw in nw_ids[1:end-1]
+        for (a, pump) in WM.ref(wm, nw, :pump)
+            g_cb_var = WM.var(wm, nw, :g_pump, a)
+            g_nc_var = WM.var(wm_nc, nw, :g_pump, a)
+            g_cb_val = WM.JuMP.callback_value(cb_data, g_cb_var)
+            JuMP.set_start_value(g_nc_var, g_cb_val)
+
+            P_cb_var = WM.var(wm, nw, :P_pump, a)
+            P_nc_var = WM.var(wm_nc, nw, :P_pump, a)
+            P_cb_val = WM.JuMP.callback_value(cb_data, P_cb_var)
+            JuMP.set_start_value(P_nc_var, P_cb_val)
+
+            qp_cb_var = WM.var(wm, nw, :qp_pump, a)
+            qp_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qp_cb_var))
+            qn_cb_var = WM.var(wm, nw, :qn_pump, a)
+            qn_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qn_cb_var))
+            q_nc_var = WM.var(wm_nc, nw, :q_pump, a)
+            JuMP.set_start_value(q_nc_var, qp_cb_val - qn_cb_val)
+
+            z_cb_var = WM.var(wm, nw, :z_pump, a)
+            z_cb_val = round(WM.JuMP.callback_value(cb_data, z_cb_var))
+            z_nc_var = WM.var(wm_nc, nw, :z_pump, a)
+            JuMP.set_start_value(z_nc_var, z_cb_val)
+            JuMP.fix(z_nc_var, z_cb_val; force = true)
+
+            if nw != nw_ids[1]
+                z_switch_on_cb_var = WM.var(wm, nw, :z_switch_on_pump, a)
+                z_switch_on_cb_val = round(WM.JuMP.callback_value(cb_data, z_switch_on_cb_var))
+                z_switch_on_nc_var = WM.var(wm_nc, nw, :z_switch_on_pump, a)
+                JuMP.set_start_value(z_switch_on_nc_var, z_switch_on_cb_val)
+                JuMP.fix(z_switch_on_nc_var, z_switch_on_cb_val; force = true)
+
+                z_switch_off_cb_var = WM.var(wm, nw, :z_switch_off_pump, a)
+                z_switch_off_cb_val = round(WM.JuMP.callback_value(cb_data, z_switch_off_cb_var))
+                z_switch_off_nc_var = WM.var(wm_nc, nw, :z_switch_off_pump, a)
+                JuMP.set_start_value(z_switch_off_nc_var, z_switch_off_cb_val)
+                JuMP.fix(z_switch_off_nc_var, z_switch_off_cb_val; force = true)
+            end
+        end
+
+        for (a, valve) in WM.ref(wm, nw, :valve)
+            qp_cb_var = WM.var(wm, nw, :qp_valve, a)
+            qp_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qp_cb_var))
+            qn_cb_var = WM.var(wm, nw, :qn_valve, a)
+            qn_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qn_cb_var))
+            q_nc_var = WM.var(wm_nc, nw, :q_valve, a)
+            JuMP.set_start_value(q_nc_var, qp_cb_val - qn_cb_val)
+
+            z_cb_var = WM.var(wm, nw, :z_valve, a)
+            z_cb_val = round(WM.JuMP.callback_value(cb_data, z_cb_var))
+            z_nc_var = WM.var(wm_nc, nw, :z_valve, a)
+            JuMP.set_start_value(z_nc_var, z_cb_val)
+            JuMP.fix(z_nc_var, z_cb_val; force = true)
+        end
+
+        for (a, regulator) in WM.ref(wm, nw, :regulator)
+            qp_cb_var = WM.var(wm, nw, :qp_regulator, a)
+            qp_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qp_cb_var))
+            qn_cb_var = WM.var(wm, nw, :qn_regulator, a)
+            qn_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qn_cb_var))
+            q_nc_var = WM.var(wm_nc, nw, :q_regulator, a)
+            JuMP.set_start_value(q_nc_var, qp_cb_val - qn_cb_val)
+
+            z_cb_var = WM.var(wm, nw, :z_regulator, a)
+            z_cb_val = round(WM.JuMP.callback_value(cb_data, z_cb_var))
+            z_nc_var = WM.var(wm_nc, nw, :z_regulator, a)
+            JuMP.set_start_value(z_nc_var, z_cb_val)
+            JuMP.fix(z_nc_var, z_cb_val; force = true)
+        end
+
+        for (a, pipe) in WM.ref(wm, nw, :pipe)
+            qp_cb_var = WM.var(wm, nw, :qp_pipe, a)
+            qp_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qp_cb_var))
+            qn_cb_var = WM.var(wm, nw, :qn_pipe, a)
+            qn_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qn_cb_var))
+            q_nc_var = WM.var(wm_nc, nw, :q_pipe, a)
+            JuMP.set_start_value(q_nc_var, qp_cb_val - qn_cb_val)
+        end
+
+        for (a, short_pipe) in WM.ref(wm, nw, :short_pipe)
+            qp_cb_var = WM.var(wm, nw, :qp_short_pipe, a)
+            qp_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qp_cb_var))
+            qn_cb_var = WM.var(wm, nw, :qn_short_pipe, a)
+            qn_cb_val = max(0.0, WM.JuMP.callback_value(cb_data, qn_cb_var))
+            q_nc_var = WM.var(wm_nc, nw, :q_short_pipe, a)
+            JuMP.set_start_value(q_nc_var, qp_cb_val - qn_cb_val)
+        end
+
+        for (a, tank) in WM.ref(wm, nw, :tank)
+            q_cb_var = WM.var(wm, nw, :q_tank, a)
+            q_cb_val = WM.JuMP.callback_value(cb_data, q_cb_var)
+            q_nc_var = WM.var(wm_nc, nw, :q_tank, a)
+            JuMP.set_start_value(q_nc_var, q_cb_val)
+        end
+
+        for (a, reservoir) in WM.ref(wm, nw, :reservoir)
+            q_cb_var = WM.var(wm, nw, :q_reservoir, a)
+            q_cb_val = WM.JuMP.callback_value(cb_data, q_cb_var)
+            q_nc_var = WM.var(wm_nc, nw, :q_reservoir, a)
+            JuMP.set_start_value(q_nc_var, q_cb_val)
+        end
+    end
+end
+
+
+function simulate_callback_nc(wm_nc::WM.AbstractWaterModel, wm::WM.AbstractWaterModel, cb_data)
+    fix_nc_from_cb(wm_nc, wm, cb_data)
+    JuMP.optimize!(wm_nc.model)
+    termination_status = JuMP.termination_status(wm_nc.model)
+    cost = JuMP.objective_value(wm_nc.model)
+    return termination_status, cost
+end
+
+
 function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, setting, optimizer, stats)
     wm_sim = _instantiate_cq_model(network, optimizer)
     network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
+    network_mn = WM.make_multinetwork(network)
+
+    wm_sim_nc = WM.instantiate_model(network_mn, WM.NCWaterModel, WM.build_mn_owf)
+    unrelax = JuMP.relax_integrality(wm_sim_nc.model)
+    JuMP.set_optimizer(wm_sim_nc.model, optimizer)
 
     return function callback_function(cb_data)
         control_settings = get_control_settings_at_nw_cb.(Ref(wm), cb_data, network_ids)
         stats.time_elapsed += @elapsed simulation_results =
             simulate_control_settings_sequential(wm_sim, control_settings)
+        nc_term, cost = simulate_callback_nc(wm_sim_nc, wm, cb_data)
 
         if any(x -> !x.feasible, simulation_results)
+            WM.Memento.info(LOGGER, "COMPARE INFEASIBLE: $(nc_term)")
             id_infeasible = findfirst(x -> !x.feasible, simulation_results)
             nw_infeasible = network_ids[id_infeasible]
             stats.time_elapsed += @elapsed add_feasibility_cut!(wm, cb_data, nw_infeasible)
             # WM.Memento.info(LOGGER, "Infeasible solution found at step $(infeasible_nw).")
         else
+            WM.Memento.info(LOGGER, "COMPARE FEASIBLE: $(nc_term), $(cost)")
             cost = sum(x.cost for x in simulation_results)
             WM.Memento.info(LOGGER, "Found feasible solution with cost $(cost).")
             stats.best_cost = cost < stats.best_cost ? cost : stats.best_cost
