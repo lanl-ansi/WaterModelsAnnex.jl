@@ -197,6 +197,7 @@ function solve_owf_upper_bounds(network::Dict, pc_path::String, mip_optimizer, n
     wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
     result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
     control_settings = get_control_settings_from_result(result_micp)
+    direction_settings = get_direction_settings_from_result(result_micp)
 
     # Set the breakpoints to be used for nonlinear functions.
     if formulation_type == 1
@@ -208,14 +209,15 @@ function solve_owf_upper_bounds(network::Dict, pc_path::String, mip_optimizer, n
     elseif formulation_type == 2
         set_breakpoints_oa!(network_mn, result_micp)
         wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = true)
-        WM._relax_all_direction_variables!(wm_master)
+        # WM._relax_all_direction_variables!(wm_master)
     end
 
     # TODO: Remove this once Gurobi.jl interface is fixed.
     wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
 
     # Add the lazy cut callback.
-    lazy_cut_stats = add_owf_lazy_cut_callback!(wm_master, network, control_settings[1], nlp_optimizer)    
+    lazy_cut_stats = add_owf_lazy_cut_callback!(wm_master, network,
+        control_settings[1], direction_settings[1], nlp_optimizer)    
 
     # Solve the model and return the result.
     result = WM.optimize_model!(wm_master; relax_integrality = false)

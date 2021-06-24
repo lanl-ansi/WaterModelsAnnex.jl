@@ -5,6 +5,13 @@ mutable struct ControlSetting
 end
 
 
+mutable struct DirectionSetting
+    network_id::Int
+    variable_indices::Array{WM._VariableIndex, 1}
+    vals::Array{Float64, 1}
+end
+
+
 function create_pump_settings_at_time(wm::WM.AbstractWaterModel, n::Int)
     control_settings = Array{Array{ControlSetting}}([])
 

@@ -30,6 +30,14 @@ function set_parameters_from_control_setting!(wm::AbstractCQModel, control_setti
 end
 
 
+function set_parameters_from_direction_setting!(wm::AbstractCQModel, direction_setting::DirectionSetting)    
+    for (i, v) in enumerate(direction_setting.variable_indices)
+        symbol, id = v.variable_symbol, v.component_index
+        JuMP.set_value(WM.var(wm, symbol)[id], direction_setting.vals[i])
+     end
+end
+
+
 function simulate_control_settings(network::Dict{String, <:Any}, control_settings::Array{ControlSetting, 1}, optimizer)
     networks = [deepcopy(network) for i in 1:Threads.nthreads()]
     wms = [_instantiate_cq_model(networks[i], optimizer) for i in 1:Threads.nthreads()]
@@ -89,11 +97,18 @@ end
 
 function get_pipe_flow_expression(wm::AbstractCQModel, arc::Arc)::Float64
     pipe = WM.ref(wm, :pipe, arc.index)
-    q = JuMP.value(WM.var(wm, :q_pipe, arc.index))
+    y_pipe = JuMP.value(WM.var(wm, :y_pipe, arc.index))
+
+    if y_pipe > 0.5
+        q_abs = max(0.0, JuMP.value(WM.var(wm, :qp_pipe, arc.index)))
+    else
+        q_abs = max(0.0, JuMP.value(WM.var(wm, :qn_pipe, arc.index)))
+    end
+
     exponent, L = WM.ref(wm, :alpha), pipe["length"]
     head_loss, viscosity = wm.data["head_loss"], wm.data["viscosity"]
     r = WM._calc_pipe_resistance(pipe, head_loss, viscosity, 1.0, 1.0)
-    return L * r * q * abs(q)^(exponent - 1.0)
+    return L * r * q_abs^exponent
 end
 
 
@@ -193,11 +208,13 @@ function flows_are_feasible(wm::AbstractCQModel)::Bool
 
         if symbol in [:des_pipe, :pump, :regulator, :valve]
             z = JuMP.value.(WM.var.(Ref(wm), Symbol("z_" * string(symbol)), component_ids))
-            vals = z .* (qp .- qn)
+            y = JuMP.value.(WM.var.(Ref(wm), Symbol("y_" * string(symbol)), component_ids))
+            vals = z .* ((y .* qp) .- ((1.0 .- y) .* qn))
             lbs = [WM.ref(wm, symbol, i, "flow_min") - 1.0e-6 for i in component_ids]
             ubs = [WM.ref(wm, symbol, i, "flow_max") + 1.0e-6 for i in component_ids]
         else
-            vals = qp .- qn
+            y = JuMP.value.(WM.var.(Ref(wm), Symbol("y_" * string(symbol)), component_ids))
+            vals = (y .* qp) .- ((1.0 .- y) .* qn)
             lbs = [WM.ref(wm, symbol, i, "flow_min") - 1.0e-6 for i in component_ids]
             ubs = [WM.ref(wm, symbol, i, "flow_max") + 1.0e-6 for i in component_ids]
         end
@@ -254,6 +271,12 @@ function build_simulation_result(wm::AbstractCQModel)::SimulationResult
 end
 
 
+function set_capacity_max!(wm::AbstractCQModel)
+    var = wm.model[:capacity_max]
+    JuMP.set_value(var, WM._calc_capacity_max(wm.data))
+end
+
+
 function set_tank_heads!(wm::AbstractCQModel)
     for (i, tank) in WM.ref(wm, :tank)
         node = WM.ref(wm, :node, tank["node"])
@@ -288,10 +311,13 @@ function set_warm_start_loose!(wm::AbstractCQModel)
 end
 
 
-function simulate_control_setting(wm::AbstractCQModel, control_setting::ControlSetting)::SimulationResult
+function simulate_control_setting(wm::AbstractCQModel,
+    control_setting::ControlSetting,
+    direction_setting::DirectionSetting)::SimulationResult
     WM._IM.load_timepoint!(wm.data, control_setting.network_id)
-    set_tank_heads!(wm); set_reservoir_heads!(wm); set_demands!(wm);
+    set_tank_heads!(wm); set_reservoir_heads!(wm); set_demands!(wm); set_capacity_max!(wm);
     set_parameters_from_control_setting!(wm, control_setting)
+    set_parameters_from_direction_setting!(wm, direction_setting)
     set_warm_start_loose!(wm)
     JuMP.optimize!(wm.model)
     return build_simulation_result(wm)
@@ -381,11 +407,15 @@ function correct_control_settings!(wm::AbstractCQModel, control_settings::Vector
 end
 
 
-function simulate_control_settings_sequential(wm::AbstractCQModel, control_settings::Vector{ControlSetting})
+function simulate_control_settings_sequential(
+    wm::AbstractCQModel, control_settings::Vector{ControlSetting},
+    direction_settings::Vector{DirectionSetting})
+    
     simulation_results = Vector{SimulationResult}([])
 
     for nw_id in sort(collect(keys(control_settings)))
-        simulation_result = simulate_control_setting(wm, control_settings[nw_id])
+        simulation_result = simulate_control_setting(wm,
+            control_settings[nw_id], direction_settings[nw_id])
         update_data_from_simulation_result(wm, simulation_result, nw_id)
         push!(simulation_results, simulation_result)
 

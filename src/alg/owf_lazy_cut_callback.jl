@@ -183,6 +183,20 @@ function _get_indicator_variables_to_nw(wm::WM.AbstractWaterModel, nw_last::Int)
 end
 
 
+function _get_direction_variables_to_nw(wm::WM.AbstractWaterModel, nw_last::Int)
+    vars = Array{WM.JuMP.VariableRef, 1}()
+    network_ids = sort(collect(WM.nw_ids(wm)))[1:nw_last]
+
+    for var_sym in [:y_pipe, :y_pump, :y_regulator, :y_short_pipe, :y_valve]
+        for nw_id in network_ids
+            append!(vars, vcat(WM.var(wm, nw_id, var_sym)...))
+        end
+    end
+
+    return vars
+end
+
+
 function feasible_simulation_result(result::Dict{String, <:Any})
     #feasible_statuses = [WM._MOI.FEASIBLE_POINT, WM._MOI.NEARLY_FEASIBLE_POINT]
     status_is_feasible = result["primal_status"] === WM._MOI.FEASIBLE_POINT
@@ -193,7 +207,10 @@ end
 
 function add_feasibility_cut!(wm::WM.AbstractWaterModel, cb_data, nw_last::Int)    
     # Collect the current integer solution into "zero" and "one" buckets.
-    vars = _get_indicator_variables_to_nw(wm, nw_last)
+    z_vars = _get_indicator_variables_to_nw(wm, nw_last)
+    y_vars = _get_direction_variables_to_nw(wm, nw_last)
+    vars = vcat(z_vars, y_vars)
+    
     zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
     one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
 
@@ -273,14 +290,31 @@ function get_control_settings_at_nw_cb(wm::WM.AbstractWaterModel, cb_data, nw::I
 end
 
 
-function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, setting, optimizer, stats)
+function get_direction_settings_at_nw_cb(wm::WM.AbstractWaterModel, cb_data, nw::Int)
+    pipe_vids = WM._VariableIndex.(nw, :pipe, :y_pipe, WM.ids(wm, nw, :pipe))
+    pump_vids = WM._VariableIndex.(nw, :pump, :y_pump, WM.ids(wm, nw, :pump))
+    valve_vids = WM._VariableIndex.(nw, :valve, :y_valve, WM.ids(wm, nw, :valve))
+    regulator_vids = WM._VariableIndex.(nw, :regulator, :y_regulator, WM.ids(wm, nw, :regulator))
+    short_pipe_vids = WM._VariableIndex.(nw, :short_pipe, :y_short_pipe, WM.ids(wm, nw, :short_pipe))
+
+    vids = vcat(pipe_vids, pump_vids, valve_vids, regulator_vids, short_pipe_vids)
+    vars = WM._get_variable_from_index.(Ref(wm), vids)
+    vals = WM.JuMP.callback_value.(Ref(cb_data), vars)
+    return DirectionSetting(nw, vids, vals)
+end
+
+
+function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, setting, direction_setting, optimizer, stats)
     wm_sim = _instantiate_cq_model(network, optimizer)
     network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
 
     return function callback_function(cb_data)
         control_settings = get_control_settings_at_nw_cb.(Ref(wm), cb_data, network_ids)
+        direction_settings = get_direction_settings_at_nw_cb.(Ref(wm), cb_data, network_ids)
+
         stats.time_elapsed += @elapsed simulation_results =
-            simulate_control_settings_sequential(wm_sim, control_settings)
+            simulate_control_settings_sequential(wm_sim,
+            control_settings, direction_settings)
 
         if any(x -> !x.feasible, simulation_results)
             id_infeasible = findfirst(x -> !x.feasible, simulation_results)
@@ -306,9 +340,9 @@ mutable struct CallbackStats
 end
 
 
-function add_owf_lazy_cut_callback!(wm::WM.AbstractWaterModel, network, setting, optimizer)
+function add_owf_lazy_cut_callback!(wm::WM.AbstractWaterModel, network, setting, direction_setting, optimizer)
     callback_stats = CallbackStats(0.0, 0, Inf)
-    callback_function = get_owf_lazy_cut_callback(wm, network, setting, optimizer, callback_stats)
+    callback_function = get_owf_lazy_cut_callback(wm, network, setting, direction_setting, optimizer, callback_stats)
     WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), callback_function)
     return callback_stats
 end

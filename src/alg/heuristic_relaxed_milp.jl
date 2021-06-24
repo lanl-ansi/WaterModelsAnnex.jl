@@ -37,9 +37,64 @@ function get_control_settings_at_nw(result::Dict{String, <:Any}, nw::Int)
 end
 
 
+function get_direction_settings_at_nw(result::Dict{String, <:Any}, nw::Int)
+    sol_nw = result["solution"]["nw"][string(nw)]
+
+    if haskey(sol_nw, "pipe")
+        pipe_ids = sort([parse(Int, x) for x in collect(keys(sol_nw["pipe"]))])
+        pipe_vals = [sol_nw["pipe"][string(i)]["y"] for i in pipe_ids]
+        pipe_vars = WM._VariableIndex.(nw, :pipe, :y_pipe, pipe_ids)
+    else
+        pipe_vals, pipe_vars = [], []
+    end
+
+    if haskey(sol_nw, "pump")
+        pump_ids = sort([parse(Int, x) for x in collect(keys(sol_nw["pump"]))])
+        pump_vals = [sol_nw["pump"][string(i)]["y"] for i in pump_ids]
+        pump_vars = WM._VariableIndex.(nw, :pump, :y_pump, pump_ids)
+    else
+        pump_vals, pump_vars = [], []
+    end
+
+    if haskey(sol_nw, "regulator")
+        regulator_ids = sort([parse(Int, x) for x in collect(keys(sol_nw["regulator"]))])
+        regulator_vals = [sol_nw["regulator"][string(i)]["y"] for i in regulator_ids]
+        regulator_vars = WM._VariableIndex.(nw, :regulator, :y_regulator, regulator_ids)
+    else
+        regulator_vals, regulator_vars = [], []
+    end
+
+    if haskey(sol_nw, "short_pipe")
+        short_pipe_ids = sort([parse(Int, x) for x in collect(keys(sol_nw["short_pipe"]))])
+        short_pipe_vals = [sol_nw["short_pipe"][string(i)]["y"] for i in short_pipe_ids]
+        short_pipe_vars = WM._VariableIndex.(nw, :short_pipe, :y_short_pipe, short_pipe_ids)
+    else
+        short_pipe_vals, short_pipe_vars = [], []
+    end
+
+    if haskey(sol_nw, "valve")
+        valve_ids = sort([parse(Int, x) for x in collect(keys(sol_nw["valve"]))])
+        valve_vals = [sol_nw["valve"][string(i)]["y"] for i in valve_ids]
+        valve_vars = WM._VariableIndex.(nw, :valve, :y_valve, valve_ids)
+    else
+        valve_vals, valve_vars = [], []
+    end
+
+    vars = vcat(pipe_vars, pump_vars, regulator_vars, short_pipe_vars, valve_vars)
+    vals = vcat(pipe_vals, pump_vals, regulator_vals, short_pipe_vals, valve_vals)
+    return DirectionSetting(nw, vars, vals)
+end
+
+
 function get_control_settings_from_result(result::Dict{String, <:Any})
     nw_ids = sort([parse(Int, x) for x in keys(result["solution"]["nw"])])[1:end-1]
     return get_control_settings_at_nw.(Ref(result), nw_ids)
+end
+
+
+function get_direction_settings_from_result(result::Dict{String, <:Any})
+    nw_ids = sort([parse(Int, x) for x in keys(result["solution"]["nw"])])[1:end-1]
+    return get_direction_settings_at_nw.(Ref(result), nw_ids)
 end
 
 
@@ -181,10 +236,19 @@ function unfix_control_setting!(wm::WM.AbstractWaterModel, control_setting::Cont
 end
 
 
-function add_feasibility_cut_from_control_settings!(wm::WM.AbstractWaterModel, control_settings::Vector{ControlSetting})
-    vids = vcat(collect([x.variable_indices for x in control_settings])...)
-    vals = vcat(collect([x.vals for x in control_settings])...)
-    vars = WM._get_variable_from_index.(Ref(wm), vids)
+function add_feasibility_cut_from_control_settings!(
+    wm::WM.AbstractWaterModel, control_settings::Vector{ControlSetting},
+    direction_settings::Vector{DirectionSetting})
+    z_vids = vcat(collect([x.variable_indices for x in control_settings])...)
+    z_vals = vcat(collect([x.vals for x in control_settings])...)
+    z_vars = WM._get_variable_from_index.(Ref(wm), z_vids)
+
+    y_vids = vcat(collect([x.variable_indices for x in direction_settings])...)
+    y_vals = vcat(collect([x.vals for x in direction_settings])...)
+    y_vars = WM._get_variable_from_index.(Ref(wm), y_vids)
+
+    vars = vcat(z_vars, y_vars)
+    vals = vcat(z_vals, y_vals)
 
     one_vars = vars[findall(x -> round(x) == 1.0, vals)]
     zero_vars = vars[findall(x -> round(x) == 0.0, vals)]
@@ -231,13 +295,17 @@ function run_sequential_heuristic(
     result_micp::Dict{String, <:Any}, time_limit::Float64)
     control_settings = get_control_settings_from_result(result_micp)
     map(x -> x.vals = round.(x.vals), control_settings)
+    direction_settings = get_direction_settings_from_result(result_micp)
+    map(x -> x.vals = round.(x.vals), direction_settings)
+
     nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
     time_elapsed = 0.0
 
     while time_elapsed < time_limit
         # Simulate the current control schedule forward in time.
         time_elapsed += @elapsed simulation_results =
-            simulate_control_settings_sequential(wm_cq, control_settings)
+            simulate_control_settings_sequential(
+                wm_cq, control_settings, direction_settings)
 
         # If the control schedule is feasible...
         if all(x -> x.feasible, simulation_results)
@@ -250,7 +318,8 @@ function run_sequential_heuristic(
 
             # Add a feasibility cut to the WaterModels model up to this time.
             add_feasibility_cut_from_control_settings!(
-                wm, control_settings[nws_infeasible])
+                wm, control_settings[nws_infeasible],
+                direction_settings[nws_infeasible])
 
             # Pick a random time index at which the controls will be updated.
             num_choose = min(length(nws_infeasible), 1)
@@ -272,9 +341,12 @@ function run_sequential_heuristic(
             if result["primal_status"] === WM._MOI.FEASIBLE_POINT
                 control_settings = get_control_settings_from_result(result)
                 map(x -> x.vals = round.(x.vals), control_settings)
+                direction_settings = get_direction_settings_from_result(result)
+                map(x -> x.vals = round.(x.vals), direction_settings)
             else
                 add_feasibility_cut_from_control_settings!(
-                    wm, control_settings[nws_infeasible])
+                    wm, control_settings[nws_infeasible],
+                    direction_settings[nws_infeasible])
             end
         end
     end

@@ -20,6 +20,22 @@ function WM.build_wf(wm::AbstractCQModel)
     parameter_regulator_indicator(wm)
     parameter_valve_indicator(wm)
 
+    # Capacity parameter.
+    parameter_capacity_max(wm)
+
+    # Flow direction parameters.
+    parameter_flow_direction_pipe(wm)
+    parameter_flow_direction_pump(wm)
+    parameter_flow_direction_regulator(wm)
+    parameter_flow_direction_short_pipe(wm)
+    parameter_flow_direction_valve(wm)
+
+    # constraint_pipe_flow_bounds(wm)
+    # constraint_pump_flow_bounds(wm)
+    # constraint_regulator_flow_bounds(wm)
+    # constraint_short_pipe_flow_bounds(wm)
+    # constraint_valve_flow_bounds(wm)
+
     # Flow conservation at all nodes.
     for (i, node) in WM.ref(wm, :node)
          WM.constraint_flow_conservation(wm, i)
