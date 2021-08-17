@@ -2,6 +2,7 @@ module WaterModelsAnnex
 
 import BlockDecomposition
 import Coluna
+import Combinatorics
 import Gurobi
 import JuMP
 import LinearAlgebra
@@ -30,6 +31,7 @@ function silence()
 end
 
 include("core/types.jl")
+include("core/data.jl")
 include("core/function.jl")
 include("core/constraint.jl")
 include("core/constraint_template.jl")
