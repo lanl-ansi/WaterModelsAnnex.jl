@@ -5,6 +5,14 @@ function set_warm_start_from_setting!(wm, network, settings, optimizer)
     nw_end = sort(collect(WM.nw_ids(wm)))[end]
     total_cost = 0.0
 
+    for nw in sort(collect(WM.nw_ids(wm)))
+        for (i, node) in WM.ref(wm, nw, :node)
+            head_mid = 0.5 * (node["head_min"] + node["head_max"])
+            h_var = WM.var(wm, nw, :h, i) 
+            JuMP.set_start_value(h_var, head_mid)
+        end
+    end
+
     for nw in sort([x.network_id for x in settings])
         result = simulate_control_setting(wm_sim, settings[nw])
 
@@ -22,15 +30,15 @@ function set_warm_start_from_setting!(wm, network, settings, optimizer)
                 
                 if comp_type in [:pump, :regulator, :valve]
                     z = wm_sim.model[Symbol("z_" * string(comp_type))][i]
-                    qp_val = max(0.0, JuMP.value(qp) * JuMP.value(z))
-                    qn_val = max(0.0, JuMP.value(qn) * JuMP.value(z))
+                    qp_val = max(0.0, JuMP.value(qp) * round(JuMP.value(z)))
+                    qn_val = max(0.0, JuMP.value(qn) * round(JuMP.value(z)))
                 else
                     qp_val, qn_val = max(0.0, JuMP.value(qp)), max(0.0, JuMP.value(qn))
                 end
 
                 q_val = qp_val - qn_val
                 y_val = q_val >= 0.0 ? 1.0 : 0.0
-                qp_val, qn_val = q_val * y_val, q_val * (1.0 - y_val)
+                qp_val, qn_val = q_val * y_val, -q_val * (1.0 - y_val)
 
                 qp_var = WM.var(wm, nw, Symbol("qp_" * string(comp_type)), i)
                 qn_var = WM.var(wm, nw, Symbol("qn_" * string(comp_type)), i)
@@ -60,8 +68,7 @@ function set_warm_start_from_setting!(wm, network, settings, optimizer)
                     JuMP.set_start_value(dhn, dhn_val)
                 elseif comp_type in [:pump]
                     z = wm_sim.model[Symbol("z_" * string(comp_type))][a]
-                    g_val = dhn_val * JuMP.value(z)
-
+                    g_val = dhn_val * round(JuMP.value(z))
                     g = WM.var(wm, nw, Symbol("g_" * string(comp_type)), a)
                     JuMP.set_start_value(g, g_val)
                 end
@@ -92,6 +99,7 @@ function set_warm_start_from_setting!(wm, network, settings, optimizer)
             if nw + 1 <= nw_end
                 wm_sim.data["time_series"]["tank"][string(i)]["init_level"][nw+1] =
                 wm_sim.data["time_series"]["tank"][string(i)]["init_level"][nw] - coeff * qt_sol
+                #println(wm_sim.data["time_series"]["tank"][string(i)]["init_level"])
             end
 
             qt = WM.var(wm, nw, :q_tank, i)
@@ -106,18 +114,17 @@ function set_warm_start_from_setting!(wm, network, settings, optimizer)
 
         for (i, pump) in WM.ref(wm, nw, :pump)
             q = JuMP.start_value(WM.var(wm, nw, :qp_pump, i))
-            z = JuMP.start_value(WM.var(wm, nw, :z_pump, i))
-            P = pump["power_fixed"] * z + pump["power_per_unit_flow"] * q
-            # Ps = P / (WM._DENSITY * WM._GRAVITY)
-            # JuMP.set_start_value(WM.var(wm, nw, :Ps_pump, i), Ps)
+            z = round(JuMP.start_value(WM.var(wm, nw, :z_pump, i)))
+            P = pump["power_fixed"] * z + pump["power_per_unit_flow"] * q * z
+            JuMP.set_start_value(WM.var(wm, nw, :P_pump, i), P)
         end
 
         total_cost += calc_simulation_cost(wm_sim)
     end
 
-    # # Start with the first network, representing the initial time step.
-    # network_ids = sort(collect(WM.nw_ids(wm)))
-    # n_1 = network_ids[1]
+    # Start with the first network, representing the initial time step.
+    network_ids = sort(collect(WM.nw_ids(wm)))
+    n_1 = network_ids[1]
 
     # # Constraints on pump switches.
     # for n_2 in network_ids[2:end-1]

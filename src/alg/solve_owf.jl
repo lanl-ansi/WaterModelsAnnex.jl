@@ -46,6 +46,17 @@ function construct_owf_model_relaxed(network_mn::Dict{String, Any}, optimizer; k
 end
 
 
+# function construct_owf_model_micp(network_mn::Dict{String, Any}, nlp_optimizer, mip_optimizer; kwargs...)
+#     wm = WM.instantiate_model(network_mn, WM.CRDWaterModel, WM.build_mn_owf)
+#     f = Juniper.register(WM.head_loss_args(wm)..., autodiff=false)
+#     optimizer = JuMP.optimizer_with_attributes(Juniper.Optimizer,
+#             "nl_solver" => nlp_optimizer, "registered_functions" => [f],
+#             "allow_almost_solved_integral" => false)
+#     WM.JuMP.set_optimizer(wm.model, optimizer)
+#     return wm # Return the relaxation-based WaterModels object.
+# end
+
+
 function construct_owf_model(network_mn::Dict{String, Any}, owf_optimizer; use_pwlrd::Bool = true, kwargs...)
     # Specify model options and construct the multinetwork OWF model.
     model_type = use_pwlrd ? WM.PWLRDWaterModel : LRDXWaterModel
@@ -224,6 +235,53 @@ function solve_owf_upper_bounds(network::Dict, pc_path::String, mip_optimizer, n
     result["true_upper_bound"] = lazy_cut_stats.best_cost
     result["true_gap"] = (result["true_upper_bound"] - result["objective_lb"]) / result["true_upper_bound"]
     return result
+end
+
+
+function solve_owf_upper_bounds_after_repair(network::Dict, mip_optimizer, nlp_optimizer)
+    # Parse the network data.
+    network_mn = WM.make_multinetwork(network)
+
+    # Solve a continuously-relaxed version of the problem.
+    wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
+    result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
+    control_settings = get_control_settings_from_result(result_micp)
+    repair_schedule(control_settings, network, nlp_optimizer)
+
+    wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = true)
+    set_warm_start_from_setting!(wm_master, network, control_settings, nlp_optimizer)
+
+    wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
+    lazy_cut_stats = add_owf_lazy_cut_callback!(wm_master, network, control_settings[1], nlp_optimizer)
+    result = WM.optimize_model!(wm_master; relax_integrality = false)
+    
+    
+    # direction_settings = get_direction_settings_from_result(result_micp)
+    # # Set the breakpoints to be used for nonlinear functions.
+    # if formulation_type == 1
+    #     set_breakpoints_piecewise_degree!(network_mn, result_micp)
+    #     wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = false)
+    #     # pairwise_cuts = load_pairwise_cuts(pc_path)
+    #     # add_pairwise_cuts(wm_master, pairwise_cuts)
+    #     add_pump_volume_cuts!(wm_master)
+    # elseif formulation_type == 2
+    #     set_breakpoints_oa!(network_mn, result_micp)
+    #     wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = true)
+    #     # WM._relax_all_direction_variables!(wm_master)
+    # end
+
+    # # TODO: Remove this once Gurobi.jl interface is fixed.
+    # wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
+
+    # # Add the lazy cut callback.
+    # lazy_cut_stats = add_owf_lazy_cut_callback!(wm_master, network,
+    #     control_settings[1], nlp_optimizer)    
+
+    # # Solve the model and return the result.
+    # result = WM.optimize_model!(wm_master; relax_integrality = false)
+    # result["true_upper_bound"] = lazy_cut_stats.best_cost
+    # result["true_gap"] = (result["true_upper_bound"] - result["objective_lb"]) / result["true_upper_bound"]
+    # return result
 end
 
 

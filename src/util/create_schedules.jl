@@ -59,7 +59,7 @@ end
 function calc_pump_cost(wm::AbstractCQModel, pump_index::Int64)::Float64
     pump = WM.ref(wm, :pump, pump_index)
     q = max(0.0, JuMP.value(WM.var(wm, :q_pump, pump_index)))
-    z = JuMP.value(wm.model[:z_pump][pump_index])
+    z = round(JuMP.value(wm.model[:z_pump][pump_index]))
     power = pump["power_fixed"] * z + pump["power_per_unit_flow"] * q * z
     return power * pump["energy_price"] * WM.ref(wm, :time_step)
 end
@@ -94,17 +94,22 @@ function get_pipe_flow_expression(wm::AbstractCQModel, arc::Arc)::Float64
     head_loss, viscosity = wm.data["head_loss"], wm.data["viscosity"]
 
     data = WM.get_wm_data(wm.data)
+
     base_length = get(data, "base_length", 1.0)
+    base_mass = get(data, "base_mass", 1.0)
     base_time = get(data, "base_time", 1.0)
-    r = WM._calc_pipe_resistance(pipe, head_loss, viscosity, base_length, base_time)
-    return L * r * q * abs(q)^(exponent - 1.0)
+
+    r = WM._calc_pipe_resistance(pipe, head_loss,
+        viscosity, base_length, base_mass, base_time)
+        
+    return L * r * sign(q) * abs(q)^exponent
 end
 
 
 function get_pump_flow_expression(wm::AbstractCQModel, arc::Arc)::Float64
     pump = WM.ref(wm, :pump, arc.index)
     q = max(0.0, JuMP.value(WM.var(wm, :q_pump, arc.index)))
-    z = max(0.0, JuMP.value(WM.var(wm, :z_pump, arc.index)))
+    z = max(0.0, round(JuMP.value(WM.var(wm, :z_pump, arc.index))))
     c = WM._calc_head_curve_coefficients(pump)
     return -z * (c[1] * q^2 + c[2] * q + c[3])
 end
@@ -164,7 +169,7 @@ function build_incidence_matrix(wm::AbstractCQModel)::Array{Float64, 2}
 
         if arc.type in [:des_pipe, :pump, :valve, :regulator]
             z = JuMP.value(wm.model[Symbol("z_" * string(arc.type))][arc.index])
-            matrix[i, col_fr], matrix[i, col_to] = z, -z
+            matrix[i, col_fr], matrix[i, col_to] = round(z), -round(z)
         else
             matrix[i, col_fr], matrix[i, col_to] = 1.0, -1.0
         end
@@ -185,7 +190,7 @@ end
 
 
 function compute_heads(incidence::Array{Float64, 2}, rhs::Array{Float64, 1})
-    return incidence \ rhs
+    return LinearAlgebra.pinv(incidence) * rhs
 end
 
 
@@ -197,7 +202,7 @@ function flows_are_feasible(wm::AbstractCQModel)::Bool
 
         if symbol in [:des_pipe, :pump, :regulator, :valve]
             z = JuMP.value.(WM.var.(Ref(wm), Symbol("z_" * string(symbol)), component_ids))
-            vals = z .* (qp .- qn)
+            vals = round.(z) .* (qp .- qn)
             lbs = [WM.ref(wm, symbol, i, "flow_min") - 1.0e-6 for i in component_ids]
             ubs = [WM.ref(wm, symbol, i, "flow_max") + 1.0e-6 for i in component_ids]
         else
@@ -215,6 +220,73 @@ function flows_are_feasible(wm::AbstractCQModel)::Bool
 end
 
 
+function get_flow_infeasibilities(wm::AbstractCQModel, nw::Int)
+    infeasibilities = Dict{WM._VariableIndex, Float64}()
+
+    for symbol in [:des_pipe, :pipe, :pump, :regulator, :short_pipe, :valve]
+        component_ids = sort(collect(WM.ids(wm, symbol)))
+        qp = max.(0.0, JuMP.value.(WM.var.(Ref(wm), Symbol("qp_" * string(symbol)), component_ids)))
+        qn = max.(0.0, JuMP.value.(WM.var.(Ref(wm), Symbol("qn_" * string(symbol)), component_ids)))
+
+        if symbol in [:des_pipe, :pump, :regulator, :valve]
+            z = JuMP.value.(WM.var.(Ref(wm), Symbol("z_" * string(symbol)), component_ids))
+            vals = round.(z) .* (qp .- qn)
+            lbs = [WM.ref(wm, symbol, i, "flow_min") - 1.0e-6 for i in component_ids]
+            ubs = [WM.ref(wm, symbol, i, "flow_max") + 1.0e-6 for i in component_ids]
+        else
+            vals = qp .- qn
+            lbs = [WM.ref(wm, symbol, i, "flow_min") - 1.0e-6 for i in component_ids]
+            ubs = [WM.ref(wm, symbol, i, "flow_max") + 1.0e-6 for i in component_ids]
+        end
+
+        var_sym = Symbol("q_" * string(symbol))
+
+        lb_viol_ids = findall(i -> vals[i] < lbs[i] - 1.0e-6, 1:length(component_ids))
+        lb_viol_comps = component_ids[lb_viol_ids]
+        lb_viols = lbs[lb_viol_ids] .- vals[lb_viol_ids]
+        lb_vids = WM._VariableIndex.(nw, symbol, var_sym, lb_viol_comps)
+        entry = Dict{WaterModels._VariableIndex, Float64}(
+            lb_vids[i] => lb_viols[i] for i in 1:length(lb_vids))
+        infeasibilities = merge(infeasibilities, entry)
+
+        ub_viol_ids = findall(i -> vals[i] > ubs[i] + 1.0e-6, 1:length(component_ids))
+        ub_viol_comps = component_ids[ub_viol_ids]
+        ub_viols = ubs[ub_viol_ids] .- vals[ub_viol_ids]
+        ub_vids = WM._VariableIndex.(nw, symbol, var_sym, ub_viol_comps)
+        entry = Dict{WaterModels._VariableIndex, Float64}(
+            ub_vids[i] => ub_viols[i] for i in 1:length(ub_vids))
+        infeasibilities = merge(infeasibilities, entry)
+    end
+
+    return infeasibilities
+end
+
+
+function get_head_infeasibilities(wm::AbstractCQModel, nw::Int)
+    matrix = build_incidence_matrix(wm)
+    vector = build_right_hand_side(wm)
+    heads = compute_heads(matrix, vector)
+    infeasibilities = Dict{WM._VariableIndex, Float64}()
+
+    for (row_index, node_id) in enumerate(sort(collect(WM.ids(wm, :node))))
+        head_min = WM.ref(wm, :node, node_id, "head_min")
+        head_max = WM.ref(wm, :node, node_id, "head_max")
+
+        if heads[row_index] > head_max + 1.0e-6
+            # println(WM.ref(wm, :node, node_id, "source_id"), " ", head_min, " ", head_max, " ", heads[row_index])
+            vid = WM._VariableIndex.(nw, :node, :h, node_id)
+            infeasibilities[vid] = head_max - heads[row_index]
+        elseif heads[row_index] < head_min - 1.0e-6
+            # println(WM.ref(wm, :node, node_id, "source_id"), " ", head_min, " ", head_max, " ", heads[row_index])
+            vid = WM._VariableIndex.(nw, :node, :h, node_id)
+            infeasibilities[vid] = head_min - heads[row_index]
+        end
+    end
+
+    return infeasibilities
+end
+
+
 function heads_are_feasible(wm::AbstractCQModel, heads::Array{Float64, 1})
     for (row_index, node_id) in enumerate(sort(collect(WM.ids(wm, :node))))
         head_min = WM.ref(wm, :node, node_id, "head_min")
@@ -223,11 +295,19 @@ function heads_are_feasible(wm::AbstractCQModel, heads::Array{Float64, 1})
         head_max_satisfied = heads[row_index] <= head_max + 1.0e-6
 
         if !(head_min_satisfied && head_max_satisfied)
+            # println(WM.ref(wm, :node, node_id, "source_id"), " ", head_min, " ", head_max, " ", heads[row_index])
             return false
         end
     end
 
     return true
+end
+
+
+function get_infeasibilities(wm::AbstractCQModel, nw::Int)
+    flow_infeasibilities = get_flow_infeasibilities(wm, nw)
+    head_infeasibilities = get_head_infeasibilities(wm, nw)
+    return merge(flow_infeasibilities, head_infeasibilities)
 end
 
 
@@ -246,11 +326,20 @@ end
 function check_simulation_feasibility(wm::AbstractCQModel)::Bool
     solved = JuMP.termination_status(wm.model) === WM._MOI.LOCALLY_SOLVED
     almost_solved = JuMP.termination_status(wm.model) === WM._MOI.ALMOST_LOCALLY_SOLVED
+    # println(JuMP.termination_status(wm.model))
     return solved || almost_solved ? check_physical_feasibility(wm) : false
 end
 
 
 function build_simulation_result(wm::AbstractCQModel)::SimulationResult
+    q_tank = calc_simulation_tank_flows(wm)
+    cost = calc_simulation_cost(wm)
+    feasible = check_simulation_feasibility(wm)
+    return SimulationResult(feasible, q_tank, cost)
+end
+
+
+function build_simulation_result_detailed(wm::AbstractCQModel)::SimulationResult
     q_tank = calc_simulation_tank_flows(wm)
     cost = calc_simulation_cost(wm)
     feasible = check_simulation_feasibility(wm)
@@ -264,6 +353,9 @@ function set_tank_heads!(wm::AbstractCQModel)
         head = node["elevation"] + tank["init_level"]
         var = wm.model[:h_tank][node["index"]]
         JuMP.set_value(var, head)
+        
+        # head_min, head_max = node["head_min"], node["head_max"]
+        # println(WM.ref(wm, :node, node["index"], "source_id"), " ", head_min, " ", head_max, " ", head)
     end
 end
 
@@ -293,6 +385,17 @@ end
 
 
 function simulate_control_setting(wm::AbstractCQModel, control_setting::ControlSetting)::SimulationResult
+    wm_data = WM.get_wm_data(wm.data)
+    WM._IM.load_timepoint!(wm_data, control_setting.network_id)
+    set_tank_heads!(wm); set_reservoir_heads!(wm); set_demands!(wm);
+    set_parameters_from_control_setting!(wm, control_setting)
+    # set_warm_start_loose!(wm)
+    JuMP.optimize!(wm.model)
+    return build_simulation_result(wm)
+end
+
+
+function simulate_control_setting_detailed(wm::AbstractCQModel, control_setting::ControlSetting)::SimulationResult
     WM._IM.load_timepoint!(wm.data, control_setting.network_id)
     set_tank_heads!(wm); set_reservoir_heads!(wm); set_demands!(wm);
     set_parameters_from_control_setting!(wm, control_setting)
@@ -385,6 +488,99 @@ function correct_control_settings!(wm::AbstractCQModel, control_settings::Vector
 end
 
 
+function simulate_control_settings_sequential_detailed(wm::AbstractCQModel, control_settings::Vector{ControlSetting})
+    simulation_results = Vector{SimulationResult}([])
+    infeasibilities = nothing
+
+    for nw_id in sort(collect(keys(control_settings)))
+        simulation_result = simulate_control_setting_detailed(wm, control_settings[nw_id])
+        update_data_from_simulation_result(wm, simulation_result, nw_id)
+        push!(simulation_results, simulation_result)
+
+        if !simulation_result.feasible
+            infeasibilities = get_infeasibilities(wm, nw_id)
+            return simulation_results, infeasibilities
+        end
+    end
+
+    # Check if the tank level constraints have been violated.
+    for (i, tank) in wm.data["time_series"]["tank"]
+        tank_nw = wm.data["tank"][i]
+
+        if tank["init_level"][end] < tank["init_level"][1]
+            if infeasibilities === nothing
+                infeasibilities = Dict{WM._VariableIndex, Float64}()
+            end
+
+            nw_last = length(tank["init_level"])
+            vid = WM._VariableIndex.(nw_last - 1, :node, :h, tank_nw["node"])
+            infeasibilities[vid] = wm.data["tank"][i]["init_level"][1] - tank["init_level"][end]
+            simulation_results[end].feasible = false
+        elseif tank["init_level"][end] > wm.data["tank"][i]["max_level"]
+            if infeasibilities === nothing
+                infeasibilities = Dict{WM._VariableIndex, Float64}()
+            end
+           
+            nw_last = length(tank["init_level"])
+            vid = WM._VariableIndex.(nw_last - 1, :node, :h, tank_nw["node"])
+            infeasibilities[vid] = wm.data["tank"][i]["max_level"] - tank["init_level"][end]
+            simulation_results[end].feasible = false
+        end
+    end
+
+    return simulation_results, infeasibilities
+end
+
+
+function simulate_control_settings_graph!(wm::AbstractCQModel,
+    control_settings::Vector{ControlSetting}, graphs::Vector{<:Any})
+    # Initialize simulation results and infeasibility vectors.
+    simulation_results = Vector{SimulationResult}([])
+    infeasibilities = nothing
+
+    for nw_id in sort(collect(keys(control_settings)))
+        simulation_result = simulate_control_setting_detailed(wm, control_settings[nw_id])
+        update_data_from_simulation_result(wm, simulation_result, nw_id)
+        push!(simulation_results, simulation_result)
+        update_graph_from_simulation_result!(wm, control_settings[nw_id], graphs[nw_id])
+
+        if !simulation_result.feasible
+            infeasibilities = get_infeasibilities(wm, nw_id)
+            return simulation_results, infeasibilities
+        end
+    end
+
+    # Check if the tank level constraints have been violated.
+    for (i, tank) in wm.data["time_series"]["tank"]
+        tank_nw = wm.data["tank"][i]
+
+        if tank["init_level"][end] < tank["init_level"][1]
+            println("level is not large enough")
+            if infeasibilities === nothing
+                infeasibilities = Dict{WM._VariableIndex, Float64}()
+            end
+
+            nw_last = length(tank["init_level"])
+            vid = WM._VariableIndex.(nw_last - 1, :node, :h, tank_nw["node"])
+            infeasibilities[vid] = wm.data["tank"][i]["init_level"][1] - tank["init_level"][end]
+            simulation_results[end].feasible = false
+        elseif tank["init_level"][end] > wm.data["tank"][i]["max_level"]
+            println("level is exceeded")
+            if infeasibilities === nothing
+                infeasibilities = Dict{WM._VariableIndex, Float64}()
+            end
+           
+            nw_last = length(tank["init_level"])
+            vid = WM._VariableIndex.(nw_last - 1, :node, :h, tank_nw["node"])
+            infeasibilities[vid] = wm.data["tank"][i]["max_level"] - tank["init_level"][end]
+            simulation_results[end].feasible = false
+        end
+    end
+
+    return simulation_results, infeasibilities
+end
+
+
 function simulate_control_settings_sequential(wm::AbstractCQModel, control_settings::Vector{ControlSetting})
     simulation_results = Vector{SimulationResult}([])
 
@@ -402,8 +598,10 @@ function simulate_control_settings_sequential(wm::AbstractCQModel, control_setti
     for (i, tank) in wm.data["time_series"]["tank"]
         if tank["init_level"][end] < wm.data["tank"][i]["min_level"]
             simulation_results[end].feasible = false
+            # println(tank["init_level"][end], " ", wm.data["tank"][i]["min_level"], " ", "tank too low")
         elseif tank["init_level"][end] > wm.data["tank"][i]["max_level"]
             simulation_results[end].feasible = false
+            # println(tank["init_level"][end], " ", wm.data["tank"][i]["max_level"], " ", "tank too high")
         end
     end
 

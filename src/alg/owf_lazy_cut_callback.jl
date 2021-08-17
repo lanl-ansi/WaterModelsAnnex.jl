@@ -413,16 +413,13 @@ function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, setting, 
         control_settings = get_control_settings_at_nw_cb.(Ref(wm), cb_data, network_ids)
         stats.time_elapsed += @elapsed simulation_results =
             simulate_control_settings_sequential(wm_sim, control_settings)
-        nc_term, cost = simulate_callback_nc(wm_sim_nc, wm, cb_data)
 
         if any(x -> !x.feasible, simulation_results)
-            WM.Memento.info(LOGGER, "COMPARE INFEASIBLE: $(nc_term)")
             id_infeasible = findfirst(x -> !x.feasible, simulation_results)
             nw_infeasible = network_ids[id_infeasible]
             stats.time_elapsed += @elapsed add_feasibility_cut!(wm, cb_data, nw_infeasible)
             # WM.Memento.info(LOGGER, "Infeasible solution found at step $(infeasible_nw).")
         else
-            WM.Memento.info(LOGGER, "COMPARE FEASIBLE: $(nc_term), $(cost)")
             cost = sum(x.cost for x in simulation_results)
             WM.Memento.info(LOGGER, "Found feasible solution with cost $(cost).")
             stats.best_cost = cost < stats.best_cost ? cost : stats.best_cost

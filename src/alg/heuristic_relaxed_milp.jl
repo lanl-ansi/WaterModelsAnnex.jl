@@ -186,21 +186,21 @@ function add_feasibility_cut_from_control_settings!(wm::WM.AbstractWaterModel, c
     vals = vcat(collect([x.vals for x in control_settings])...)
     vars = WM._get_variable_from_index.(Ref(wm), vids)
 
-    one_vars = vars[findall(x -> round(x) == 1.0, vals)]
-    zero_vars = vars[findall(x -> round(x) == 0.0, vals)]
+    one_vars = vars[findall(x -> abs.(round(x)) == 1.0, vals)]
+    zero_vars = vars[findall(x -> abs.(round(x)) == 0.0, vals)]
     JuMP.@constraint(wm.model, sum(zero_vars) -
         sum(one_vars) >= 1.0 - length(one_vars))
 end
 
 
-function objective_mean_tank_levels(wm::WM.AbstractWaterModel)
+function objective_mean_tank_levels(wm::WM.AbstractWaterModel, nws::Vector{Int})
     objective = JuMP.AffExpr(0.0)
 
-    for nw in sort(collect(WM.nw_ids(wm)))
+    for nw in nws
         for tank in values(WM.ref(wm, nw, :tank))
             node = WM.ref(wm, nw, :node, tank["node"])
-            h = WM.var(wm, nw, :h, tank["node"])
-            head_mid = 0.5 * (node["head_min"] + node["head_max"])
+            h = WM.var(wm, nw, :h, tank["node"])            
+            head_mid = 0.5 * (node["head_max"] + node["head_min"])
             objective += (h - head_mid)^2
         end
     end
@@ -209,8 +209,121 @@ function objective_mean_tank_levels(wm::WM.AbstractWaterModel)
 end
 
 
+function objective_predicted_tank_levels(wm::WM.AbstractWaterModel, simulation_results::Vector{SimulationResult}, iteration_num::Int)
+    objective = JuMP.AffExpr(0.0)
+    tank_heads = Dict{Int, Vector{Float64}}()
+
+    for nw in sort(collect(WM.nw_ids(wm)))[1:end-1]
+        time_step = WM.ref(wm, nw, :time_step)
+
+        for tank in values(WM.ref(wm, nw, :tank))
+            node = WM.ref(wm, nw, :node, tank["node"])
+            q_tank = simulation_results[nw].q_tank[tank["index"]]
+            surface_area = 0.25 * pi * tank["diameter"]^2
+            h = WM.var(wm, nw + 1, :h, tank["node"])
+
+            if nw == 1
+                tank_heads[tank["index"]] = [node["elevation"] + tank["init_level"]]
+            end
+
+            push!(tank_heads[tank["index"]],
+                tank_heads[tank["index"]][end] -
+                q_tank / surface_area * time_step)
+        end
+    end
+
+    for (i, tank_ts) in tank_heads
+        default(show = true)
+        plot(1:length(tank_ts), tank_ts, legend=false)
+
+        for nw in sort(collect(WM.nw_ids(wm)))
+            tank = WM.ref(wm, nw, :tank, i)
+            node = WM.ref(wm, nw, :node, tank["node"])
+            min_head = node["elevation"] + tank["min_level"]
+            max_head = node["elevation"] + tank["max_level"]
+
+            head_change = 0.0
+
+            if tank_ts[nw] < min_head
+                head_change += min_head - tank_ts[nw]
+            elseif tank_ts[nw] > max_head
+                head_change -= tank_ts[nw] - max_head
+            end
+
+            tank_ts[nw] += head_change
+            tank_ts[2:end-1] .-= head_change / (length(tank_ts) - 3.0)
+        end
+
+        # head_change = (tank_ts[1] - tank_ts[end]) * float(iteration_num)
+       
+        tank = WM.ref(wm, 1, :tank, i)
+        node = WM.ref(wm, 1, :node, tank["node"])
+        min_head = node["elevation"] + tank["min_level"]
+        max_head = node["elevation"] + tank["max_level"]
+        # plot!(1:length(tank_ts), tank_ts, legend=false)
+        plot!(1:length(tank_ts), ones(length(tank_ts)) * min_head, legend=false)
+        plot!(1:length(tank_ts), ones(length(tank_ts)) * max_head, legend=false)
+        readline()
+    end
+
+    for nw in sort(collect(WM.nw_ids(wm)))
+        for tank in values(WM.ref(wm, nw, :tank))
+            h = WM.var(wm, nw, :h, tank["node"])
+            objective += (h - tank_heads[tank["index"]][nw])^2
+        end
+    end
+
+    JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
+end
+
+
+
+function objective_min_losses(wm::WM.AbstractWaterModel, nws::Vector{Int})
+    objective = JuMP.AffExpr(0.0)
+
+    for nw in nws
+        for pipe in values(WM.ref(wm, nw, :pipe))
+            dhp = WM.var(wm, nw, :dhp_pipe, pipe["index"])
+            dhn = WM.var(wm, nw, :dhn_pipe, pipe["index"])
+            objective += dhp + dhn
+        end
+
+        for pump in values(WM.ref(wm, nw, :pump))
+            objective -= WM.var(wm, nw, :g_pump, pump["index"])
+        end
+
+        # for tank in values(WM.ref(wm, nw, :tank))
+        #     node = WM.ref(wm, nw, :node, tank["node"])
+        #     h = WM.var(wm, nw, :h, tank["node"])            
+        #     head_mid = node["head_min"] + 0.5 * (node["head_max"] - node["head_min"])
+        #     objective += (h - head_mid)^2
+        # end
+    end
+
+    JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
+end
+
+
+function constraint_tank_final_range(wm::WM.AbstractWaterModel)
+    for nw in sort(collect(WM.nw_ids(wm)))[end]
+        for tank in values(WM.ref(wm, nw, :tank))
+            node = WM.ref(wm, nw, :node, tank["node"])
+            head_min = node["elevation"] + WM.ref(wm, 1, :tank, tank["index"], "init_level")
+            head_max = node["elevation"] + WM.ref(wm, nw, :tank, tank["index"], "max_level")
+            h = WM.var(wm, nw, :h, tank["node"])
+
+            head_lower = head_min + 0.1 * (head_max - head_min)
+            head_upper = head_min + 0.9 * (head_max - head_min)
+
+            JuMP.@constraint(wm.model, h >= head_lower)
+            JuMP.@constraint(wm.model, h <= head_upper)
+        end
+    end
+end
+
+
 function solve_pseudo_relaxation_nw(wm::WM.AbstractWaterModel, nws::Vector{Int})
-    nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
+    nw_ids = sort(collect(WM.nw_ids(wm)))
     nw_last_binary = sort(findall(x -> x in nws, nw_ids))[end]
     nw_relaxed = nw_ids[nw_last_binary+1:end]
 
@@ -226,13 +339,42 @@ function solve_pseudo_relaxation_nw(wm::WM.AbstractWaterModel, nws::Vector{Int})
 end
 
 
+function feasibility_pump_set_objective!(wm::WM.AbstractWaterModel, control_settings::Vector{ControlSetting})
+    objective = JuMP.AffExpr(0.0)
+
+    for control_setting in control_settings
+        vars = WM._get_variable_from_index.(Ref(wm), control_setting.variable_indices)
+        z_one_ids = findall(i -> abs(round(control_setting.vals[i])) == 1.0, 1:length(vars))
+        z_zero_ids = findall(i -> abs(round(control_setting.vals[i])) == 0.0, 1:length(vars))
+        z_one_vars, z_zero_vars = vars[z_one_ids], vars[z_zero_ids]
+
+        if length(z_one_vars) > 0
+            objective += length(z_one_vars) - sum(z_one_vars)
+        end
+
+        if length(z_zero_vars) > 0
+            objective += sum(z_zero_vars)
+        end
+    end
+
+    JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
+end
+
+
+function feasibility_pump_at_last(wm::WM.AbstractWaterModel, control_settings::Vector{ControlSetting})
+    feasibility_pump_set_objective!(wm, control_settings)
+    unfix_control_setting!.(Ref(wm), control_settings)
+    return WM.optimize_model!(wm; relax_integrality = false)
+end
+
+
 function run_sequential_heuristic(
     wm::WM.AbstractWaterModel, wm_cq::CQWaterModel,
     result_micp::Dict{String, <:Any}, time_limit::Float64)
     control_settings = get_control_settings_from_result(result_micp)
-    map(x -> x.vals = round.(x.vals), control_settings)
+    map(x -> x.vals = abs.(round.(x.vals)), control_settings)
     nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
-    time_elapsed = 0.0
+    time_elapsed, num_look_back, full_iter_num = 0.0, 2, 1
 
     while time_elapsed < time_limit
         # Simulate the current control schedule forward in time.
@@ -250,11 +392,12 @@ function run_sequential_heuristic(
 
             # Add a feasibility cut to the WaterModels model up to this time.
             add_feasibility_cut_from_control_settings!(
-                wm, control_settings[nws_infeasible])
+                wm, control_settings[nws_infeasible[1:end]])
 
             # Pick a random time index at which the controls will be updated.
-            num_choose = min(length(nws_infeasible), 1)
-            nws_random = sort(Random.shuffle(nws_infeasible)[1:num_choose])
+            num_back = min(num_look_back, length(nws_infeasible))
+            nws_random = [Random.shuffle(nws_infeasible[end-num_back+1:end])[1]]
+            # nws_random = [nws_infeasible[end-num_back+1:end][1]]
 
             # Unfix the controls at this time step and beyond.
             nws_unfixed = nw_ids[nws_random[end]:end]
@@ -266,21 +409,30 @@ function run_sequential_heuristic(
                 simulation_results[nws_fixed])
 
             # Solve the corresponding pseudo-relaxation at the random time.
-            time_elapsed += @elapsed result =
-                solve_pseudo_relaxation_nw(wm, nws_random)
+            # objective_min_losses(wm, nws_unfixed[1:end-1])
+            objective_mean_tank_levels(wm, sort(collect(WM.nw_ids(wm))))
+            time_elapsed += @elapsed result = solve_pseudo_relaxation_nw(wm, nws_random)
 
             if result["primal_status"] === WM._MOI.FEASIBLE_POINT
                 control_settings = get_control_settings_from_result(result)
-                map(x -> x.vals = round.(x.vals), control_settings)
+                map(x -> x.vals = abs.(round.(x.vals)), control_settings)
+                num_look_back = 2
+            elseif length(nws_unfixed) == 1
+                # return control_settings
+                # map(x -> x.vals = abs.(round.(x.vals)), control_settings)
+            #     time_elapsed += @elapsed result = feasibility_pump_at_last(wm, control_settings)
+            #     control_settings = get_control_settings_from_result(result)
+            #     map(x -> x.vals = abs.(round.(x.vals)), control_settings)
+                num_look_back += 2
             else
-                add_feasibility_cut_from_control_settings!(
-                    wm, control_settings[nws_infeasible])
+                num_look_back += 2
             end
         end
     end
 
     WM.Memento.info(LOGGER, "[HEUR] Could not find a heuristic solution.")
-    return nothing
+    return control_settings
+    #return nothing
 end
 
 
@@ -296,7 +448,8 @@ function run_heuristic(
     pairwise_cuts = load_pairwise_cuts(pc_path)
     add_pairwise_cuts(wm, pairwise_cuts)
 
-    objective_mean_tank_levels(wm)
+    # objective_min_losses(wm, sort(collect(WM.nw_ids(wm)))[1:end-1])
+    objective_mean_tank_levels(wm, sort(collect(WM.nw_ids(wm))))
     add_pump_volume_cuts!(wm)
 
     wm_cq = _instantiate_cq_model(network, nlp_optimizer)
@@ -314,8 +467,16 @@ function run_heuristic(
 end
 
 
+function run_heuristic_micp(network::Dict{String, Any}, mip_optimizer, nlp_optimizer, time_limit::Float64)
+    network_mn = WM.make_multinetwork(network)
+    wm_micp = construct_owf_model_micp(network_mn, nlp_optimizer, mip_optimizer)
+    objective_min_losses(wm_micp, sort(collect(WM.nw_ids(wm_micp)))[1:end-1])
+    return WM.optimize_model!(wm_micp; relax_integrality = false)
+end
+
+
 function run_heuristic(network::Dict{String, Any}, mip_optimizer, nlp_optimizer, time_limit::Float64)
-    set_breakpoints_accuracy!(network, 0.25, 1.0e-4)
+    WM.set_breakpoints!(network, 0.25, 1.0e-4)
     network_mn = WM.make_multinetwork(network)
     wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
     result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
@@ -323,58 +484,22 @@ function run_heuristic(network::Dict{String, Any}, mip_optimizer, nlp_optimizer,
     wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf)
     WM.JuMP.set_optimizer(wm.model, mip_optimizer)
 
-    objective_mean_tank_levels(wm)
+    # objective_min_losses(wm, sort(collect(WM.nw_ids(wm)))[1:end-1])
+    objective_mean_tank_levels(wm, sort(collect(WM.nw_ids(wm))))
     add_pump_volume_cuts!(wm)
+    # constraint_tank_final_range(wm)
 
     wm_cq = _instantiate_cq_model(network, nlp_optimizer)
-    return run_sequential_heuristic(wm, wm_cq, result_micp, time_limit)
+    control_settings = run_sequential_heuristic(wm, wm_cq, result_micp, time_limit)
 
-    # # Specify model options and construct the multinetwork OWF model.
-    # wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf)
+    if control_settings !== nothing
+        results = simulate_control_settings_sequential(wm_cq, control_settings)
+        is_feasible = all(x -> x.feasible, results)
+        total_cost = sum(x.cost for x in results)
+        WM.Memento.info(LOGGER, "[HEUR] Found heuristic solution, feasibility $(is_feasible).") 
+        WM.Memento.info(LOGGER, "[HEUR] Found heuristic solution, cost $(total_cost).")
+    end
 
-    # # Set the optimizer and other important solver parameters.
-    # WM.JuMP.set_optimizer(wm.model, mip_optimizer)
-
-    # binary_vars = filter(v -> JuMP.is_binary(v), JuMP.all_variables(wm.model))
-    # vars_to_relax_not_y = filter(v -> !occursin("_y", JuMP.name(v)), binary_vars)
-    # vars_to_relax_not_xy = filter(v -> !occursin("_x", JuMP.name(v)), vars_to_relax_not_y)
-    # map(x -> !JuMP.is_fixed(x) && JuMP.unset_binary(x), vars_to_relax_not_xy)
-
-    # return WM.optimize_model!(wm)
-
-
-    # set_breakpoints_num_mn!(network_mn, 10)
-
-    # networks_mn = [deepcopy(network_mn) for i in 1:Threads.nthreads()]
-    # networks = [deepcopy(network) for i in 1:Threads.nthreads()]
-    # heuristic_result = Vector{Any}([nothing for i in 1:Threads.nthreads()])
-    # # wms = [_instantiate_cq_model(networks[i], nlp_optimizer) for i in 1:Threads.nthreads()]
-    # # settings = [[ControlSetting(n, [], [])] for n in 1:Threads.nthreads()]
-    # # results = [[SimulationResult(false, Dict{Int, Float64}(), 0.0)] for n in 1:Threads.nthreads()]
-    # feasible, costs = [false for n in 1:Threads.nthreads()], zeros(Float64, Threads.nthreads())
-    
-    # Threads.@threads for k in 1:Threads.nthreads()
-    #     heuristic_result[k] = run_feasibility_pump(networks_mn[k], mip_optimizer)
-    #     is_feasible = heuristic_result[k] === nothing ? false : 
-    #         heuristic_result[k]["primal_status"] === WM._MOI.FEASIBLE_POINT
-
-    #     println(is_feasible)
-
-    #     if is_feasible
-    #         feasible[k], costs[k] = WaterModelsAnnex.simulate_result_mn(
-    #             networks[k], heuristic_result[k], nlp_optimizer)
-    #     else
-    #         feasible[k], costs[k] = false, Inf
-    #     end
-
-    #     # settings[k] = is_feasible ? get_control_settings_from_result(heuristic_result[k]) : settings[k]
-    #     # results[k] = is_feasible ? simulate_control_setting.(Ref(wms[k]), settings[k]) : results[k]
-    #     # feasible[k] = is_feasible ? all(x.feasible for x in results[k]) : feasible[k]
-    #     # costs[k] = is_feasible ? sum(x.cost for x in results[k]) : Inf
-    #     # costs[k] = is_feasible ? heuristic_result[k]["objective"] : Inf
-    # end
-
-    # println("Heuristic solution costs: ", minimum(costs), " ", costs)
-    # heuristic_result[findmin(costs)[2]]["objective"] = minimum(costs)
-    # return heuristic_result[findmin(costs)[2]]
+    repair_schedule(control_settings, network, nlp_optimizer)
+    return control_settings
 end
