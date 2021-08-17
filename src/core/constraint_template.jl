@@ -14,6 +14,13 @@ function constraint_pipe_flow_nonlinear(wm::WM.AbstractWaterModel, a::Int; nw::I
 end
 
 
+function constraint_volume_sum(wm::WM.AbstractWaterModel, i::Int; nw::Int=WM.nw_id_default, kwargs...)
+    tank_ids = Vector{Int}(WM.ref(wm, nw, :tank_group, i, "tank_indices"))
+    WM._initialize_con_dict(wm, :volume_sum, nw=nw, is_array=true)
+    WM.con(wm, nw, :volume_sum)[i] = Array{JuMP.ConstraintRef}([])
+    constraint_volume_sum(wm, nw, i, tank_ids)
+end
+
 function constraint_pipe_head_nonlinear(wm::WM.AbstractWaterModel, a::Int; nw::Int=WM.nw_id_default, kwargs...)
     node_fr, node_to = WM.ref(wm, nw, :pipe, a)["node_fr"], WM.ref(wm, nw, :pipe, a)["node_to"]
     exponent, L = WM.ref(wm, nw, :alpha), WM.ref(wm, nw, :pipe, a)["length"]

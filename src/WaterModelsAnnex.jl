@@ -4,9 +4,11 @@ import BlockDecomposition
 import Coluna
 import Gurobi
 import JuMP
+import LinearAlgebra
 import PolyhedralRelaxations
 import WaterModels
 import LightGraphs
+import MetaGraphs
 
 const BD = BlockDecomposition
 const WM = WaterModels
@@ -29,9 +31,11 @@ end
 
 include("core/types.jl")
 include("core/function.jl")
+include("core/constraint.jl")
 include("core/constraint_template.jl")
 include("core/control_setting.jl")
 include("core/simulation_result.jl")
+include("core/variable.jl")
 
 include("form/cd.jl")
 include("form/cq.jl")
@@ -39,6 +43,7 @@ include("form/cdx.jl")
 include("form/lrdx.jl")
 
 include("prob/wf.jl")
+include("prob/owf.jl")
 include("prob/owfh.jl")
 
 include("alg/set_breakpoints.jl")
@@ -55,10 +60,13 @@ include("alg/pump_volume_cuts.jl")
 include("alg/solve_owf.jl")
 include("alg/heuristic_linear_program.jl")
 include("alg/heuristic_master_program.jl")
+include("alg/repair_schedule.jl")
 
+include("util/bound_problem.jl")
 include("util/graph.jl")
 include("util/create_schedules.jl")
 include("util/warm_start.jl")
+include("util/obbt.jl")
 include("core/export.jl")
 
 end

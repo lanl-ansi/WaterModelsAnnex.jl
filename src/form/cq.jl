@@ -180,6 +180,7 @@ end
 function objective_strong_duality(wm::AbstractCQModel)
     wm_data = WM.get_wm_data(wm.data)
     base_length = get(wm_data, "base_length", 1.0)
+    base_mass = get(wm_data, "base_mass", 1.0)
     base_time = get(wm_data, "base_time", 1.0)
     alpha = WM._get_alpha_min_1(wm) + 1.0
     
@@ -216,7 +217,7 @@ function objective_strong_duality(wm::AbstractCQModel)
         
         for (a, pipe) in WM.ref(wm, n, :pipe)
             L_x_r = pipe["length"] * WM._calc_pipe_resistance(
-                pipe, pipe_type, viscosity, base_length, base_time)
+                pipe, pipe_type, viscosity, base_length, base_mass, base_time)
             
             push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qp_pipe[a])))
             push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qn_pipe[a])))

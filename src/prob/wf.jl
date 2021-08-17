@@ -1,3 +1,16 @@
+function build_mn_wf_volume(wm::WM.AbstractWaterModel)
+    WM.build_mn_wf(wm)
+    
+    for n in sort(collect(WM.nw_ids(wm)))
+        variable_volume_sum(wm; nw = n)
+        
+        for i in WM.ids(wm, n, :tank_group)
+            constraint_volume_sum(wm, i; nw = n)
+        end
+    end
+end
+
+
 function WM.build_wf(wm::AbstractCQModel)
     # Create head loss functions, if necessary.
     WM._function_head_loss(wm)
@@ -428,24 +441,24 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         constraint_strong_duality(wm; nw=n)
     end
 
-    n_1 = network_ids[1]
+    # n_1 = network_ids[1]
 
-    for n_2 in network_ids[2:end-1]
-        WM.variable_pump_switch_on(wm; nw = n_2)
-        WM.variable_pump_switch_off(wm; nw = n_2)
+    # for n_2 in network_ids[2:end-1]
+    #     WM.variable_pump_switch_on(wm; nw = n_2)
+    #     WM.variable_pump_switch_off(wm; nw = n_2)
 
-        for (a, pump) in WM.ref(wm, :pump, nw = n_2)
-            WM.constraint_pump_switch_on(wm, a, n_1, n_2)
-            WM.constraint_pump_switch_off(wm, a, n_1, n_2)
-        end
+    #     for (a, pump) in WM.ref(wm, :pump, nw = n_2)
+    #         WM.constraint_pump_switch_on(wm, a, n_1, n_2)
+    #         WM.constraint_pump_switch_off(wm, a, n_1, n_2)
+    #     end
 
-        n_1 = n_2
-    end
+    #     n_1 = n_2
+    # end
 
-    # Constraints on the total number of pump switches.
-    for (a, pump) in WM.ref(wm, :pump; nw = network_ids[1])
-        WM.constraint_on_off_pump_switch(wm, a, network_ids[2:end-1])
-    end
+    # # Constraints on the total number of pump switches.
+    # for (a, pump) in WM.ref(wm, :pump; nw = network_ids[1])
+    #     WM.constraint_on_off_pump_switch(wm, a, network_ids[2:end-1])
+    # end
 
     # Initialize head variables for the final time index.
     WM.variable_head(wm; nw = network_ids[end])
