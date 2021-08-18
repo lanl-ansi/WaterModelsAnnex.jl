@@ -238,6 +238,36 @@ function solve_owf_upper_bounds(network::Dict, pc_path::String, mip_optimizer, n
 end
 
 
+function solve_owf_upper_bounds(network_mn::Dict, network::Dict, build_method::Function, mip_optimizer, nlp_optimizer)
+    # Solve a continuously-relaxed version of the problem.
+    wm_micp = WM.instantiate_model(network_mn, WM.CRDWaterModel, build_method)
+    WM.JuMP.set_optimizer(wm_micp.model, nlp_optimizer)
+    WM.optimize_model!(wm_micp; relax_integrality = true)
+ 
+    # Set the optimizer and other important solver parameters.
+    wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, build_method)
+    WM.JuMP.set_optimizer(wm.model, mip_optimizer)
+    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+
+    # TODO: Remove this once Gurobi.jl interface is fixed.
+    wm.model.moi_backend.optimizer.model.has_generic_callback = false
+
+    # Add the lazy cut callback.
+    lazy_cut_stats = add_owf_lazy_cut_callback!(wm, network, nlp_optimizer)    
+
+    # Solve the model and store the result.
+    result = WM.optimize_model!(wm)
+
+    # Add true upper bound data to the result dictionary.
+    result["true_upper_bound"] = lazy_cut_stats.best_cost
+    result["true_gap"] = (result["true_upper_bound"] -
+        result["objective_lb"]) / result["true_upper_bound"]
+
+    # Return the result dictionary.
+    return result
+end
+
+
 function solve_owf_upper_bounds_after_repair(network::Dict, mip_optimizer, nlp_optimizer)
     # Parse the network data.
     network_mn = WM.make_multinetwork(network)

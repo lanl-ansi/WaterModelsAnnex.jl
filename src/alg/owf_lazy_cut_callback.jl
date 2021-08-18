@@ -400,14 +400,9 @@ function simulate_callback_nc(wm_nc::WM.AbstractWaterModel, wm::WM.AbstractWater
 end
 
 
-function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, setting, optimizer, stats)
+function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, optimizer, stats)
     wm_sim = _instantiate_cq_model(network, optimizer)
     network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
-    network_mn = WM.make_multinetwork(network)
-
-    wm_sim_nc = WM.instantiate_model(network_mn, WM.NCWaterModel, WM.build_mn_owf)
-    unrelax = JuMP.relax_integrality(wm_sim_nc.model)
-    JuMP.set_optimizer(wm_sim_nc.model, optimizer)
 
     return function callback_function(cb_data)
         control_settings = get_control_settings_at_nw_cb.(Ref(wm), cb_data, network_ids)
@@ -438,9 +433,9 @@ mutable struct CallbackStats
 end
 
 
-function add_owf_lazy_cut_callback!(wm::WM.AbstractWaterModel, network, setting, optimizer)
+function add_owf_lazy_cut_callback!(wm::WM.AbstractWaterModel, network, optimizer)
     callback_stats = CallbackStats(0.0, 0, Inf)
-    callback_function = get_owf_lazy_cut_callback(wm, network, setting, optimizer, callback_stats)
+    callback_function = get_owf_lazy_cut_callback(wm, network, optimizer, callback_stats)
     WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), callback_function)
     return callback_stats
 end
