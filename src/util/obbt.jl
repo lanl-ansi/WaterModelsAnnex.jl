@@ -56,7 +56,7 @@ function solve_obbt_owf_volume!(
 
         time_elapsed > time_limit && ((terminate = true) && break)
         WM._update_data_bounds!(data, bound_problems)
-        WM.set_flow_partitions!(data, 1.0, 1.0e-4)
+        WM.set_flow_partitions_si!(data, 1.0, 1.0e-4)
         !terminate && WM._clean_bound_problems!(bound_problems, vals)
 
         # Log widths.
