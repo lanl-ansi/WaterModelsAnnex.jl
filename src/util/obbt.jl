@@ -2,8 +2,8 @@ function solve_obbt_owf_volume!(
     data::Dict{String,<:Any}, optimizer; use_relaxed_network::Bool = true,
     model_type::Type = WM.PWLRDWaterModel, time_limit::Float64 = 3600.0,
     upper_bound::Float64 = Inf, upper_bound_constraint::Bool = false,
-    max_iter::Int = 100, solve_relaxed::Bool = true,
-    limit_problems::Bool = false, kwargs...)
+    max_iter::Int = 100, solve_relaxed::Bool = true, limit_problems::Bool = false,
+    error_tolerance::Float64 = 1.0, flow_tolerance::Float64 = 1.0e-4, kwargs...)
     # Print a message with relevant algorithm limit information.
     message = "[OBBT] Maximum time limit set to default value of $(time_limit) seconds."
     WM.Memento.info(WM._LOGGER, message)
@@ -56,7 +56,7 @@ function solve_obbt_owf_volume!(
 
         time_elapsed > time_limit && ((terminate = true) && break)
         WM._update_data_bounds!(data, bound_problems)
-        WM.set_flow_partitions_si!(data, 1.0, 1.0e-4)
+        WM.set_flow_partitions_si!(data, error_tolerance, flow_tolerance)
         !terminate && WM._clean_bound_problems!(bound_problems, vals)
 
         # Log widths.
