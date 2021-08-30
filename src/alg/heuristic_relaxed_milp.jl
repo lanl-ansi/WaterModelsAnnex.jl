@@ -33,7 +33,7 @@ function get_control_settings_at_nw(result::Dict{String, <:Any}, nw::Int)
 
     vars = vcat(pump_vars, regulator_vars, valve_vars)
     vals = vcat(pump_vals, regulator_vals, valve_vals)
-    return ControlSetting(nw, vars, vals)
+    return ControlSetting(nw, vars, round.(vals))
 end
 
 
@@ -199,8 +199,8 @@ function objective_mean_tank_levels(wm::WM.AbstractWaterModel, nws::Vector{Int})
     for nw in nws
         for tank in values(WM.ref(wm, nw, :tank))
             node = WM.ref(wm, nw, :node, tank["node"])
-            h = WM.var(wm, nw, :h, tank["node"])            
-            head_mid = 0.5 * (node["head_max"] + node["head_min"])
+            h = WM.var(wm, nw, :h, tank["node"])
+            head_mid = 0.5 * (node["head_min"] + node["head_max"])
             objective += (h - head_mid)^2
         end
     end
@@ -322,12 +322,13 @@ function constraint_tank_final_range(wm::WM.AbstractWaterModel)
 end
 
 
-function solve_pseudo_relaxation_nw(wm::WM.AbstractWaterModel, nws::Vector{Int})
+function solve_pseudo_relaxation_nw(wm::WM.AbstractWaterModel, nw_random::Int)
     nw_ids = sort(collect(WM.nw_ids(wm)))
-    nw_last_binary = sort(findall(x -> x in nws, nw_ids))[end]
+    nw_last_binary = findfirst(x -> x == nw_random, nw_ids)
     nw_relaxed = nw_ids[nw_last_binary+1:end]
 
     vars_to_relax = vcat(WM.get_all_binary_vars_at_nw!.(Ref(wm), nw_relaxed)...)
+    map(x -> JuMP.is_fixed(x) && JuMP.unfix(x), vars_to_relax)
     map(x -> !JuMP.is_fixed(x) && JuMP.unset_binary(x), vars_to_relax)
     map(x -> !JuMP.is_fixed(x) && JuMP.set_lower_bound(x, 0.0), vars_to_relax)
     map(x -> !JuMP.is_fixed(x) && JuMP.set_upper_bound(x, 1.0), vars_to_relax)
@@ -374,7 +375,7 @@ function run_sequential_heuristic(
     control_settings = get_control_settings_from_result(result_micp)
     map(x -> x.vals = abs.(round.(x.vals)), control_settings)
     nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
-    time_elapsed, num_look_back, full_iter_num = 0.0, 2, 1
+    time_elapsed, num_look_back = 0.0, 2
 
     while time_elapsed < time_limit
         # Simulate the current control schedule forward in time.
@@ -386,32 +387,31 @@ function run_sequential_heuristic(
             # Return the control settings schedule.
             return control_settings
         else # If the control schedule is not feasible...
-            # Get the set of times at and before the infeasibility.
-            nws_infeasible = nw_ids[1:length(simulation_results)]
-            WM.Memento.info(LOGGER, "[HEUR] Feasible time indices: $(nws_infeasible).")
+            # Get the set of times before the first infeasibility.
+            nws_feasible = nw_ids[1:max(1, length(simulation_results)-1)]
+            WM.Memento.info(LOGGER, "[HEUR] Feasible time indices: $(nws_feasible).")
 
-            # Add a feasibility cut to the WaterModels model up to this time.
-            add_feasibility_cut_from_control_settings!(
-                wm, control_settings[nws_infeasible[1:end]])
+            # Add a feasibility cut to the WaterModels model up to the infeasible time.
+            nws_cut = nw_ids[1:length(simulation_results)]
+            add_feasibility_cut_from_control_settings!(wm, control_settings[nws_cut])
 
-            # Pick a random time index at which the controls will be updated.
-            num_back = min(num_look_back, length(nws_infeasible))
-            nws_random = [Random.shuffle(nws_infeasible[end-num_back+1:end])[1]]
-            # nws_random = [nws_infeasible[end-num_back+1:end][1]]
+            # Pick a random time index at which the controls will be changed.
+            num_back = min(num_look_back, length(nws_cut))
+            first_id = max(1, length(nws_cut) - num_back)
+            nw_random = Random.rand(nws_cut[first_id:end])
 
             # Unfix the controls at this time step and beyond.
-            nws_unfixed = nw_ids[nws_random[end]:end]
+            nws_unfixed = nw_ids[nw_random:end]
             unfix_control_setting!.(Ref(wm), control_settings[nws_unfixed])
- 
+
             # Fix the controls prior to this time step.
-            nws_fixed = nw_ids[1:nws_random[end]-1]
-            fix_control_setting!.(Ref(wm), control_settings[nws_fixed],
-                simulation_results[nws_fixed])
+            nws_fixed = nw_random == 1 ? [] : nw_ids[1:max(1, nw_random-1)]
+            fix_control_setting!.(Ref(wm), control_settings[nws_fixed], simulation_results[nws_fixed])
 
             # Solve the corresponding pseudo-relaxation at the random time.
             # objective_min_losses(wm, nws_unfixed[1:end-1])
             objective_mean_tank_levels(wm, sort(collect(WM.nw_ids(wm))))
-            time_elapsed += @elapsed result = solve_pseudo_relaxation_nw(wm, nws_random)
+            time_elapsed += @elapsed result = solve_pseudo_relaxation_nw(wm, nw_random)
 
             if result["primal_status"] === WM._MOI.FEASIBLE_POINT
                 control_settings = get_control_settings_from_result(result)
@@ -420,9 +420,9 @@ function run_sequential_heuristic(
             elseif length(nws_unfixed) == 1
                 # return control_settings
                 # map(x -> x.vals = abs.(round.(x.vals)), control_settings)
-            #     time_elapsed += @elapsed result = feasibility_pump_at_last(wm, control_settings)
-            #     control_settings = get_control_settings_from_result(result)
-            #     map(x -> x.vals = abs.(round.(x.vals)), control_settings)
+                # time_elapsed += @elapsed result = feasibility_pump_at_last(wm, control_settings)
+                # control_settings = get_control_settings_from_result(result)
+                # map(x -> x.vals = abs.(round.(x.vals)), control_settings)
                 num_look_back += 2
             else
                 num_look_back += 2
@@ -433,6 +433,33 @@ function run_sequential_heuristic(
     WM.Memento.info(LOGGER, "[HEUR] Could not find a heuristic solution.")
     return control_settings
     #return nothing
+end
+
+
+function run_heuristic_mn(
+    network_mn::Dict{String, <:Any}, network::Dict{String, <:Any},
+    mip_optimizer, nlp_optimizer, time_limit::Float64)
+    # network_mn = WM.make_multinetwork(network)
+    WM.set_flow_partitions_si!(network_mn, 1.0, 1.0e-6)
+    wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
+    result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
+
+    wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf)
+    WM.JuMP.set_optimizer(wm.model, mip_optimizer)
+
+    objective_mean_tank_levels(wm, sort(collect(WM.nw_ids(wm))))
+    wm_cq = _instantiate_cq_model(network, nlp_optimizer)
+    control_settings = run_sequential_heuristic(wm, wm_cq, result_micp, time_limit)
+
+    if control_settings !== nothing
+        results = simulate_control_settings_sequential(wm_cq, control_settings)
+        is_feasible = all(x -> x.feasible, results)
+        total_cost = sum(x.cost for x in results)
+        WM.Memento.info(LOGGER, "[HEUR] Found heuristic solution, feasibility $(is_feasible).") 
+        WM.Memento.info(LOGGER, "[HEUR] Found heuristic solution, cost $(total_cost).")
+    end
+
+    return control_settings
 end
 
 
