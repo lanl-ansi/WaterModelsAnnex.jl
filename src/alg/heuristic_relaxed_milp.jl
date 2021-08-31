@@ -436,11 +436,9 @@ function run_sequential_heuristic(
 end
 
 
-function run_heuristic_mn(
-    network_mn::Dict{String, <:Any}, network::Dict{String, <:Any},
-    mip_optimizer, nlp_optimizer, time_limit::Float64)
-    # network_mn = WM.make_multinetwork(network)
-    WM.set_flow_partitions_si!(network_mn, 1.0, 1.0e-6)
+function run_heuristic_mn(network_mn::Dict{String, <:Any}, mip_optimizer, nlp_optimizer, time_limit::Float64)
+    network = WM.make_single_network(network_mn)
+    WM.set_flow_partitions_si!(network_mn, 5.0, 1.0e-6)
     wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
     result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
 
