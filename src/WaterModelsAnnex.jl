@@ -43,6 +43,7 @@ include("form/cd.jl")
 include("form/cq.jl")
 include("form/cdx.jl")
 include("form/lrdx.jl")
+include("form/ncz.jl")
 
 include("prob/wf.jl")
 include("prob/wf-relaxed.jl")

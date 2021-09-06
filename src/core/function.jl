@@ -53,3 +53,16 @@ end
 function WM._function_head_loss(wm::AbstractCQModel)
     JuMP.register(wm.model, head_loss_args(wm)...)
 end
+
+
+function WM.head_loss_args(wm::AbstractNCZModel)
+    alpha_m1 = WM._get_alpha_min_1(wm)
+    return (:head_loss, 1, WM._f_alpha(alpha_m1, convex=false),
+        WM._df_alpha(alpha_m1, convex=false),
+        WM._d2f_alpha(alpha_m1, convex=false))
+end
+
+
+function WM._function_head_loss(wm::AbstractNCZModel)
+    JuMP.register(wm.model, WM.head_loss_args(wm)...)
+end
