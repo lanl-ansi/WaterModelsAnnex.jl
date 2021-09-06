@@ -82,7 +82,7 @@ function constraint_strong_duality(wm::AbstractCDXModel)
         end
 
         for (a, pump) in WM.ref(wm, n, :pump)
-            @assert pump["head_curve_form"] in [WM.PUMP_QUADRATIC, WM.PUMP_BEST_EFFICIENCY_POINT, WM.PUMP_LINEAR_POWER]
+            @assert pump["pump_type"] in [WM.PUMP_QUADRATIC, WM.PUMP_BEST_EFFICIENCY_POINT, WM.PUMP_LINEAR_POWER]
             c = WM._calc_head_curve_coefficients(pump)
             
             push!(f_5, JuMP.@NLexpression(wm.model, c[1] / 3.0 * qp_pump[a]^3 +
