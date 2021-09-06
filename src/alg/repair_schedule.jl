@@ -399,6 +399,10 @@ function repair_infeasibilities(wm::WM.AbstractWaterModel, graphs, control_setti
 
     # Select one of the infeasibilities encountered at random.
     infeasibility = Random.rand(collect(infeasibilities))
+    # infeasibilities_arr = collect([(i, x) for (i, x) in infeasibilities])
+    # sort!(infeasibilities_arr, by = x -> abs(x[2]));
+    # infeasibility = infeasibilities_arr[end]
+
     println(JuMP.termination_status(wm.model), " ", infeasibility)
 
     tank_node_ids = [x["node"] for (i, x) in WM.ref(wm, :tank)]
@@ -523,7 +527,7 @@ function repair_schedule(control_settings::Vector{ControlSetting}, network::Dict
 
     iterations = 1
 
-    while !all(x -> x.feasible, simulation_results) && iterations <= 5000
+    while !all(x -> x.feasible, simulation_results) && iterations <= 50
         nw_inf = sort([i.network_index for (i, x) in infeasibilities])[1]
         nw_first_id = findfirst(x -> x == nw_inf, nw_ids)
         nw_best_id = max(nw_best_id, nw_first_id)
