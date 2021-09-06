@@ -45,7 +45,9 @@ include("form/cdx.jl")
 include("form/lrdx.jl")
 
 include("prob/wf.jl")
+include("prob/wf-relaxed.jl")
 include("prob/owf.jl")
+include("prob/owf-relaxed.jl")
 include("prob/owfh.jl")
 
 include("alg/set_breakpoints.jl")

@@ -1,3 +1,15 @@
+function variable_flow_excess(wm::WM.AbstractWaterModel; nw::Int=nw_id_default, report::Bool=true)
+    # Initialize variables for total hydraulic head.
+    q_excess = WM.var(wm, nw)[:q_excess] = JuMP.@variable(wm.model,
+        [i in WM.ids(wm, nw, :node)], base_name = "$(nw)_q_excess",
+        lower_bound = 0.0,
+        start = WM.comp_start_value(WM.ref(wm, nw, :node, i), "q_excess_start"))
+
+    # Initialize an entry to the solution component dictionary for pressures.
+    report && WM.sol_component_value(wm, nw, :node, :q_excess, WM.ids(wm, nw, :node), q_excess)
+end
+
+
 function variable_volume_sum(wm::WM.AbstractWaterModel; nw::Int=WM.nw_id_default, bounded::Bool=true, report::Bool=true)
     # Initialize variables for total hydraulic head.
     V_sum = WM.var(wm, nw)[:V_sum] = JuMP.@variable(wm.model,
