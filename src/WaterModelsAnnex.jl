@@ -3,7 +3,6 @@ module WaterModelsAnnex
 import BlockDecomposition
 import Coluna
 import Combinatorics
-import GraphPlot
 import Gurobi
 import JuMP
 import LinearAlgebra
