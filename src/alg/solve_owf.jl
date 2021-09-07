@@ -200,40 +200,33 @@ function solve_owf_formulation(network::Dict, pc_path::String, mip_optimizer, nl
 end
 
 
-function solve_owf_upper_bounds(network::Dict, pc_path::String, mip_optimizer, nlp_optimizer, formulation_type::Int)
-    # Parse the network data.
-    network_mn = WM.make_multinetwork(network)
-
+function solve_owf_upper_bounds(network_mn::Dict, pc_path::String, formulation_type, mip_optimizer, nlp_optimizer)
     # Solve a continuously-relaxed version of the problem.
-    wm_micp = construct_owf_model_relaxed(network_mn, nlp_optimizer)
-    result_micp = WM.optimize_model!(wm_micp; relax_integrality = true)
-    control_settings = get_control_settings_from_result(result_micp)
-    # direction_settings = get_direction_settings_from_result(result_micp)
+    wm = WM.instantiate_model(network_mn, formulation_type, WM.build_mn_owf)
 
-    # Set the breakpoints to be used for nonlinear functions.
-    if formulation_type == 1
-        set_breakpoints_piecewise_degree!(network_mn, result_micp)
-        wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = false)
-        pairwise_cuts = load_pairwise_cuts(pc_path)
-        add_pairwise_cuts(wm_master, pairwise_cuts)
-        add_pump_volume_cuts!(wm_master)
-    elseif formulation_type == 2
-        set_breakpoints_oa!(network_mn, result_micp)
-        wm_master = construct_owf_model(network_mn, mip_optimizer; use_pwlrd = true)
-        # WM._relax_all_direction_variables!(wm_master)
-    end
+    # Set the optimizer and other important solver parameters.
+    WM.JuMP.set_optimizer(wm.model, mip_optimizer)
+    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+
+    # Add extra cuts to the formulation.
+    pairwise_cuts = load_pairwise_cuts(pc_path)
+    add_pairwise_cuts(wm, pairwise_cuts)
+    add_pump_volume_cuts!(wm)
 
     # TODO: Remove this once Gurobi.jl interface is fixed.
-    wm_master.model.moi_backend.optimizer.model.has_generic_callback = false
+    wm.model.moi_backend.optimizer.model.has_generic_callback = false
+
+    # Setup a single-step version of the network.
+    network = WM.make_single_network(network_mn)
 
     # Add the lazy cut callback.
-    lazy_cut_stats = add_owf_lazy_cut_callback!(wm_master, network,
-        control_settings[1], nlp_optimizer)    
+    lazy_cut_stats = add_owf_lazy_cut_callback!(wm, network, nlp_optimizer)
 
     # Solve the model and return the result.
-    result = WM.optimize_model!(wm_master; relax_integrality = false)
+    result = WM.optimize_model!(wm; relax_integrality = false)
     result["true_upper_bound"] = lazy_cut_stats.best_cost
-    result["true_gap"] = (result["true_upper_bound"] - result["objective_lb"]) / result["true_upper_bound"]
+    result["true_gap"] = (result["true_upper_bound"] -
+        result["objective_lb"]) / result["true_upper_bound"]
     return result
 end
 
@@ -377,7 +370,6 @@ end
 
 function solve_pairwise_cuts(network::Dict, optimizer)
     WM.Memento.info(LOGGER, "Beginning cut preprocessing routine.")
-    set_breakpoints_num!(network, 10, 10)
     cut_time = @elapsed pairwise_cuts = compute_pairwise_cuts(network, optimizer)
     WM.Memento.info(LOGGER, "Pairwise cut preprocessing completed in $(cut_time) seconds.")
     return pairwise_cuts

@@ -39,7 +39,6 @@ function add_pump_volume_cuts!(wm::WM.AbstractWaterModel)
 
     # Start with the first network, representing the initial time step.
     n_1, n_f = network_ids[1], network_ids[end]
-    source_pumps = [parse(Int, x) for x in find_source_pumps(wm.data["nw"]["1"])]
 
     for n in network_ids
         time_step = WM.ref(wm, n, :time_step)
@@ -49,9 +48,5 @@ function add_pump_volume_cuts!(wm::WM.AbstractWaterModel)
 
         tank_volume = (sum(WM.var(wm, n_1, :V)) - sum(WM.var(wm, n, :V))) / time_step
         WM.JuMP.@constraint(wm.model, demand_volume + tank_volume <= reservoir_volume)
-
-        # pump_volume = _sum_remaining_pump_flows(wm, nws_remaining, source_pumps)
-        # tank_volume = (sum(WM.var(wm, n, :V)) - sum(WM.var(wm, nws_remaining[end] + 1, :V))) / time_step
-        # c = WM.JuMP.@constraint(wm.model, demand_volume - tank_volume == reservoir_volume)
     end
 end
