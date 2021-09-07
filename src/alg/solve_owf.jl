@@ -200,11 +200,14 @@ function solve_owf_formulation(network::Dict, pc_path::String, mip_optimizer, nl
 end
 
 
-function solve_owf_upper_bounds(network_mn::Dict, pc_path::String, formulation_type, mip_optimizer, nlp_optimizer)
+function solve_owf_upper_bounds(network_mn::Dict, pc_path::String, mip_optimizer, nlp_optimizer)
     # Solve a continuously-relaxed version of the problem.
-    wm = WM.instantiate_model(network_mn, formulation_type, WM.build_mn_owf)
+    wm_micp = WM.instantiate_model(network_mn, WM.CRDWaterModel, WM.build_mn_owf)
+    WM.JuMP.set_optimizer(wm_micp.model, nlp_optimizer)
+    WM.optimize_model!(wm_micp; relax_integrality = true)
 
     # Set the optimizer and other important solver parameters.
+    wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf)
     WM.JuMP.set_optimizer(wm.model, mip_optimizer)
     WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
 
