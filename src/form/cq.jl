@@ -232,7 +232,7 @@ function objective_strong_duality(wm::AbstractCQModel)
         end
         
         for (a, pump) in WM.ref(wm, n, :pump)
-            @assert pump["head_curve_form"] in [WM.PUMP_QUADRATIC,
+            @assert pump["pump_type"] in [WM.PUMP_QUADRATIC,
                 WM.PUMP_BEST_EFFICIENCY_POINT, WM.PUMP_LINEAR_POWER]
 
             c = WM._calc_head_curve_coefficients(pump)
