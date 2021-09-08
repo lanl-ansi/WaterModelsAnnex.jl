@@ -234,6 +234,40 @@ function solve_owf_upper_bounds(network_mn::Dict, pc_path::String, mip_optimizer
 end
 
 
+function solve_owf_upper_bounds_lrdx(network_mn::Dict, pc_path::String, mip_optimizer, nlp_optimizer)
+    # Solve a continuously-relaxed version of the problem.
+    wm_micp = WM.instantiate_model(network_mn, WM.CRDWaterModel, WM.build_mn_owf)
+    WM.JuMP.set_optimizer(wm_micp.model, nlp_optimizer)
+    WM.optimize_model!(wm_micp; relax_integrality = true)
+
+    # Set the optimizer and other important solver parameters.
+    wm = WM.instantiate_model(network_mn, LRDXWaterModel, WM.build_mn_owf)
+    WM.JuMP.set_optimizer(wm.model, mip_optimizer)
+    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+
+    # Add extra cuts to the formulation.
+    pairwise_cuts = load_pairwise_cuts(pc_path)
+    add_pairwise_cuts(wm, pairwise_cuts)
+    add_pump_volume_cuts!(wm)
+
+    # TODO: Remove this once Gurobi.jl interface is fixed.
+    wm.model.moi_backend.optimizer.model.has_generic_callback = false
+
+    # Setup a single-step version of the network.
+    network = WM.make_single_network(network_mn)
+
+    # Add the lazy cut callback.
+    lazy_cut_stats = add_owf_lazy_cut_callback!(wm, network, nlp_optimizer)
+
+    # Solve the model and return the result.
+    result = WM.optimize_model!(wm; relax_integrality = false)
+    result["true_upper_bound"] = lazy_cut_stats.best_cost
+    result["true_gap"] = (result["true_upper_bound"] -
+        result["objective_lb"]) / result["true_upper_bound"]
+    return result
+end
+
+
 function solve_owf_upper_bounds(network_mn::Dict, network::Dict, build_method::Function, mip_optimizer, nlp_optimizer)
     # Solve a continuously-relaxed version of the problem.
     wm_micp = WM.instantiate_model(network_mn, WM.CRDWaterModel, build_method)
