@@ -168,7 +168,7 @@ function constraint_pipe_flow_nonlinear(
 
     # Loop over consequential points (i.e., those that have nonzero head loss).
     for flow_value in filter(x -> x > 0.0, partition_n)
-        # Add a linear outer approximation of the convex relaxation at `pt`.
+        # Add a linear outer approximation of the convex relaxation at `flow_value`.
         lhs = _calc_pipe_flow_integrated_oa(qn, 1.0 - y, flow_value, exponent)
 
         # Add outer-approximation of the nonlinear flow constraint.
@@ -308,14 +308,13 @@ function constraint_on_off_pump_gain_nonlinear(
         # Add a linear outer approximation of the convex relaxation at `pt`.
         lhs = _calc_pump_gain_integrated_oa(g, z, pt, coeffs)
 
-        # Add outer-approximation of the integrated head loss constraint.
+        # Add outer-approximation of the integrated head gain constraint.
         c = JuMP.@constraint(wm.model, lhs <= g_nl)
 
-        # Append the :pump_head_loss_integrated constraint array.
+        # Append the :on_off_pump_gain_nonlinear constraint array.
         append!(WM.con(wm, n, :on_off_pump_gain_nonlinear)[a], [c])
     end
 
-    # Add a constraint that lower-bounds the head gain variable.
     lambda, f_all = WM.var(wm, n, :lambda_pump), Vector{Float64}([])
     breakpoints = WM.get_pump_head_gain_partition(pump)
 
