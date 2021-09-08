@@ -51,6 +51,7 @@ include("prob/owf.jl")
 include("prob/owf-relaxed.jl")
 include("prob/owfh.jl")
 
+include("alg/heuristic_minlp.jl")
 include("alg/set_breakpoints.jl")
 include("alg/dantzig_wolfe.jl")
 include("alg/simulate.jl")

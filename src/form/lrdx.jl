@@ -130,57 +130,60 @@ end
 function constraint_pipe_flow_nonlinear(
     wm::AbstractLRDXModel, n::Int, a::Int, node_fr::Int, node_to::Int, exponent::Float64,
     L::Float64, r::Float64, q_max_reverse::Float64, q_min_forward::Float64)
-    # Get object from the WaterModels reference dictionary.
-    pipe = WM.ref(wm, n, :pipe, a)
-
     # Get the variable for flow directionality.
     y = WM.var(wm, n, :y_pipe, a)
 
-    # Get variables for positive flow and head difference.
+    # Get variables for positive flow and nonlinear term.
     qp, qp_nl = WM.var(wm, n, :qp_pipe, a), WM.var(wm, n, :qp_nl_pipe, a)
 
-    # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in abs.(WM.get_pipe_flow_lower_breakpoints_positive(pipe))
-        # Add a linear outer approximation of the convex relaxation at `pt`.
-        lhs = _calc_pipe_flow_integrated_oa(qp, y, pt, exponent)
+    # Get the corresponding positive flow partitioning.
+    partition_p = WM.get_pipe_flow_partition_positive(WM.ref(wm, n, :pipe, a))
+    bp_range = 1:length(partition_p)
 
-        # Add outer-approximation of the integrated head loss constraint.
+    # Loop over consequential points (i.e., those that have nonzero head loss).
+    for flow_value in filter(x -> x > 0.0, partition_p)
+        # Add a linear outer approximation of the convex relaxation at `pt`.
+        lhs = _calc_pipe_flow_integrated_oa(qp, y, flow_value, exponent)
+
+        # Add outer-approximation of the nonlinear flow constraint.
         c = JuMP.@constraint(wm.model, r * lhs <= qp_nl / L)
 
-        # Append the :pipe_head_loss_integrated constraint array.
+        # Append the :pipe_flow_nonlinear constraint array.
         append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
     end
 
+    # Add a constraint that upper-bounds the nonlinear flow variable.
     lambda_p = WM.var(wm, n, :lambda_p_pipe)
-    breakpoints_p = abs.(WM.get_pipe_flow_upper_breakpoints_positive(pipe))
-    num_lambda_p = length(breakpoints_p)
-    f_p = (r * 1.0 / (1.0 + exponent)) .* breakpoints_p.^(1.0 + exponent)
-    qp_nl_ub_expr = sum(f_p[k] * lambda_p[a, k] for k in 1:num_lambda_p)
-    c = JuMP.@constraint(wm.model, qp_nl / L <= qp_nl_ub_expr)
-    append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
+    f_p = (r * 1.0 / (1.0 + exponent)) .* partition_p.^(1.0 + exponent)
+    f_p_ub_expr = sum(f_p[k] * lambda_p[a, k] for k in bp_range)
+    c = JuMP.@constraint(wm.model, qp_nl / L <= f_p_ub_expr)
+    append!(WM.con(wm, n, :pipe_flow_nonlinear, a), [c])
 
-    # Get variables for negative flow and head difference.
+    # Get variables for negative flow and nonlinear term.
     qn, qn_nl = WM.var(wm, n, :qn_pipe, a), WM.var(wm, n, :qn_nl_pipe, a)
 
-    # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in abs.(WM.get_pipe_flow_lower_breakpoints_negative(pipe))
-        # Add a linear outer approximation of the convex relaxation at `pt`.
-        lhs = _calc_pipe_flow_integrated_oa(qn, 1.0 - y, pt, exponent)
+    # Get the corresponding negative flow partitioning.
+    partition_n = sort(-WM.get_pipe_flow_partition_negative(WM.ref(wm, n, :pipe, a)))
+    bn_range = 1:length(partition_n)
 
-        # Add outer-approximation of the integrated head loss constraint.
+    # Loop over consequential points (i.e., those that have nonzero head loss).
+    for flow_value in filter(x -> x > 0.0, partition_n)
+        # Add a linear outer approximation of the convex relaxation at `pt`.
+        lhs = _calc_pipe_flow_integrated_oa(qn, 1.0 - y, flow_value, exponent)
+
+        # Add outer-approximation of the nonlinear flow constraint.
         c = JuMP.@constraint(wm.model, r * lhs <= qn_nl / L)
 
-        # Append the :pipe_head_loss_integrated constraint array.
+        # Append the :pipe_flow_nonlinear constraint array.
         append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
     end
 
+    # Add a constraint that upper-bounds the head loss variable.
     lambda_n = WM.var(wm, n, :lambda_n_pipe)
-    breakpoints_n = abs.(WM.get_pipe_flow_upper_breakpoints_negative(pipe))
-    num_lambda_n = length(breakpoints_n)
-    f_n = (r * 1.0 / (1.0 + exponent)) .* breakpoints_n.^(1.0 + exponent)
-    qn_nl_ub_expr = sum(f_n[k] * lambda_n[a, k] for k in 1:num_lambda_n)
-    c = JuMP.@constraint(wm.model, qn_nl / L <= qn_nl_ub_expr)
-    append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
+    f_n = (r * 1.0 / (1.0 + exponent)) .* partition_n.^(1.0 + exponent)
+    f_n_ub_expr = sum(f_n[k] * lambda_n[a, k] for k in bn_range)
+    c = JuMP.@constraint(wm.model, qn_nl / L <= f_n_ub_expr)
+    append!(WM.con(wm, n, :pipe_flow_nonlinear, a), [c])
 end
 
 
@@ -188,64 +191,66 @@ function constraint_pipe_head_nonlinear(
     wm::AbstractLRDXModel, n::Int, a::Int, node_fr::Int, node_to::Int, exponent::Float64,
     L::Float64, r::Float64, q_max_reverse::Float64, q_min_forward::Float64)
     # Get object from the WaterModels reference dictionary.
-    pipe = WM.ref(wm, n, :pipe, a)
     head_loss = wm.ref[:it][WM.wm_it_sym][:head_loss]
     viscosity = wm.ref[:it][WM.wm_it_sym][:viscosity]
-    base_length = get(wm.data, "base_length", 1.0)
-    base_time = get(wm.data, "base_time", 1.0)
+
+    wm_data = WM.get_wm_data(wm.data)
+    base_length = get(wm_data, "base_length", 1.0)
+    base_mass = get(wm_data, "base_mass", 1.0)
+    base_time = get(wm_data, "base_time", 1.0)
 
     # Get the variable for flow directionality.
     y = WM.var(wm, n, :y_pipe, a)
     L_r, r_r = L^(-1.0 / exponent), r^(-1.0 / exponent)
 
-    # Get variables for positive flow and head difference.
+    # Get variables for positive head difference and nonlinear term.
     dhp, dhp_nl = WM.var(wm, n, :dhp_pipe, a), WM.var(wm, n, :dhp_nl_pipe, a)
+    partition_p = WM.get_pipe_head_difference_partition_positive(
+        WM.ref(wm, n, :pipe, a), head_loss, viscosity, base_length, base_mass, base_time)
+    bp_range = 1:length(partition_p)
 
     # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in abs.(WM.get_pipe_head_difference_lower_breakpoints_positive(
-        pipe, head_loss, viscosity, base_length, base_time))
-        # Add a linear outer approximation of the convex relaxation at `pt`.
-        lhs = _calc_pipe_head_integrated_oa(dhp, y, pt, exponent)
+    for dh_value in filter(x -> x > 0.0, partition_p)
+        # Add a linear outer approximation of the convex relaxation at `dh_value`.
+        lhs = _calc_pipe_head_integrated_oa(dhp, y, dh_value, exponent)
 
         # Add outer-approximation of the integrated head loss constraint.
         c = JuMP.@constraint(wm.model, r_r * lhs <= dhp_nl / L_r)
 
-        # Append the :pipe_head_loss_integrated constraint array.
+        # Append the :pipe_head_nonlinear constraint array.
         append!(WM.con(wm, n, :pipe_head_nonlinear)[a], [c])
     end
 
+    # Add a constraint that upper-bounds the nonlinear flow variable.
     lambda_p = WM.var(wm, n, :lambda_p_pipe)
-    breakpoints_p = abs.(WM.get_pipe_head_difference_upper_breakpoints_positive(
-        pipe, head_loss, viscosity, base_length, base_time))
-    num_lambda_p = length(breakpoints_p)
-    f_p = (r_r * exponent / (1.0 + exponent)) .* breakpoints_p.^(1.0 + 1.0 / exponent)
-    dhp_nl_ub_expr = sum(f_p[k] * lambda_p[a, k] for k in 1:num_lambda_p)
-    c = JuMP.@constraint(wm.model, dhp_nl / L_r <= dhp_nl_ub_expr)
+    f_p = (r_r * exponent / (1.0 + exponent)) .* partition_p.^(1.0 + 1.0 / exponent)
+    f_p_ub_expr = sum(f_p[k] * lambda_p[a, k] for k in bp_range)
+    c = JuMP.@constraint(wm.model, dhp_nl / L_r <= f_p_ub_expr)
     append!(WM.con(wm, n, :pipe_head_nonlinear)[a], [c])
 
     # Get variables for positive flow and head difference.
     dhn, dhn_nl = WM.var(wm, n, :dhn_pipe, a), WM.var(wm, n, :dhn_nl_pipe, a)
+    partition_n = sort(WM.get_pipe_head_difference_partition_negative(
+        WM.ref(wm, n, :pipe, a), head_loss, viscosity, base_length, base_mass, base_time))
+    bn_range = 1:length(partition_n)
 
     # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in abs.(WM.get_pipe_head_difference_lower_breakpoints_negative(
-        pipe, head_loss, viscosity, base_length, base_time))
-        # Add a linear outer approximation of the convex relaxation at `pt`.
-        lhs = _calc_pipe_head_integrated_oa(dhn, 1.0 - y, pt, exponent)
+    for dh_value in filter(x -> x > 0.0, partition_n)
+        # Add a linear outer approximation of the convex relaxation at `dh_value`.
+        lhs = _calc_pipe_head_integrated_oa(dhn, 1.0 - y, dh_value, exponent)
 
         # Add outer-approximation of the integrated head loss constraint.
         c = JuMP.@constraint(wm.model, r_r * lhs <= dhn_nl / L_r)
 
-        # Append the :pipe_head_loss_integrated constraint array.
+        # Append the :pipe_head_nonlinear constraint array.
         append!(WM.con(wm, n, :pipe_head_nonlinear)[a], [c])
     end
 
+    # Add a constraint that upper-bounds the nonlinear flow variable.
     lambda_n = WM.var(wm, n, :lambda_n_pipe)
-    breakpoints_n = abs.(WM.get_pipe_head_difference_upper_breakpoints_negative(
-        pipe, head_loss, viscosity, base_length, base_time))
-    num_lambda_n = length(breakpoints_n)
-    f_n = (r_r * exponent / (1.0 + exponent)) .* breakpoints_n.^(1.0 + 1.0 / exponent)
-    dhn_nl_ub_expr = sum(f_n[k] * lambda_n[a, k] for k in 1:num_lambda_n)
-    c = JuMP.@constraint(wm.model, dhn_nl / L_r <= dhn_nl_ub_expr)
+    f_n = (r_r * exponent / (1.0 + exponent)) .* partition_n.^(1.0 + 1.0 / exponent)
+    f_n_ub_expr = sum(f_n[k] * lambda_n[a, k] for k in bn_range)
+    c = JuMP.@constraint(wm.model, dhn_nl / L_r <= f_n_ub_expr)
     append!(WM.con(wm, n, :pipe_head_nonlinear)[a], [c])
 end
 
@@ -261,9 +266,10 @@ function constraint_on_off_pump_flow_nonlinear(
 
     # Get variables for positive flow and head difference.
     qp, qp_nl = WM.var(wm, n, :qp_pump, a), WM.var(wm, n, :qp_nl_pump, a)
+    partition = WM.ref(wm, n, :pump, a, "flow_partition")
 
     # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in WM.get_pump_flow_upper_breakpoints_positive(pump)
+    for pt in partition
         # Add a linear outer approximation of the convex relaxation at `pt`.
         rhs = _calc_pump_flow_integrated_oa(qp, z, pt, coeffs)
 
@@ -277,9 +283,8 @@ function constraint_on_off_pump_flow_nonlinear(
     # Add a constraint that lower-bounds the head gain variable.
     lambda, g = WM.var(wm, n, :lambda_pump), WM.var(wm, n, :g_pump, a)
     head_curve_function = WM._calc_head_curve_function(pump)
-    breakpoints = WM.get_pump_flow_lower_breakpoints_positive(pump)
-    f_all = head_curve_function.(collect(breakpoints))
-    gain_lb_expr = sum(f_all[k] .* lambda[a, k] for k in 1:length(breakpoints))
+    f_all = head_curve_function.(collect(partition))
+    gain_lb_expr = sum(f_all[k] .* lambda[a, k] for k in 1:length(partition))
     c = JuMP.@constraint(wm.model, gain_lb_expr <= g)
     append!(WM.con(wm, n, :on_off_pump_flow_nonlinear)[a], [c])
 end
@@ -299,7 +304,7 @@ function constraint_on_off_pump_gain_nonlinear(
     g_nl = WM.var(wm, n, :g_nl_pump, a)
 
     # Loop over breakpoints strictly between the lower and upper variable bounds.
-    for pt in WM.get_pump_head_gain_upper_breakpoints_positive(pump)
+    for pt in WM.get_pump_head_gain_partition(pump)
         # Add a linear outer approximation of the convex relaxation at `pt`.
         lhs = _calc_pump_gain_integrated_oa(g, z, pt, coeffs)
 
@@ -312,7 +317,7 @@ function constraint_on_off_pump_gain_nonlinear(
 
     # Add a constraint that lower-bounds the head gain variable.
     lambda, f_all = WM.var(wm, n, :lambda_pump), Vector{Float64}([])
-    breakpoints = WM.get_pump_head_gain_lower_breakpoints_positive(pump)
+    breakpoints = WM.get_pump_head_gain_partition(pump)
 
     for g_hat in breakpoints
         push!(f_all, ((-sqrt(-4.0 * coeffs[1] * coeffs[3] + 4.0 * coeffs[1] * g_hat + coeffs[2]^2) -
@@ -347,13 +352,6 @@ end
 
 ""
 function constraint_strong_duality(wm::AbstractLRDXModel; nw::Int=WM.nw_id_default)
-    base_length = get(wm.data, "base_length", 1.0)
-    base_time = get(wm.data, "base_time", 1.0)
-    alpha = WM._get_alpha_min_1(wm) + 1.0
-    
-    pipe_type = wm.ref[:it][WM.wm_it_sym][:head_loss]
-    viscosity = wm.ref[:it][WM.wm_it_sym][:viscosity]
-
     qp_pipe_nl = sum(WM.var(wm, nw, :qp_nl_pipe))
     qn_pipe_nl = sum(WM.var(wm, nw, :qn_nl_pipe))
     dhp_pipe_nl = sum(WM.var(wm, nw, :dhp_nl_pipe))

@@ -58,9 +58,10 @@ function constraint_pipe_flow_nonlinear(wm::WM.AbstractWaterModel, a::Int; nw::I
     node_fr, node_to = WM.ref(wm, nw, :pipe, a)["node_fr"], WM.ref(wm, nw, :pipe, a)["node_to"]
     exponent, L = WM.ref(wm, nw, :alpha), WM.ref(wm, nw, :pipe, a)["length"]
     base_length = get(wm.data, "base_length", 1.0)
+    base_mass = get(wm.data, "base_mass", 1.0)
     base_time = get(wm.data, "base_time", 1.0)
 
-    r = WM._calc_pipe_resistance(WM.ref(wm, nw, :pipe, a), wm.data["head_loss"], wm.data["viscosity"], base_length, base_time)
+    r = WM._calc_pipe_resistance(WM.ref(wm, nw, :pipe, a), wm.data["head_loss"], wm.data["viscosity"], base_length, base_mass, base_time)
     q_max_reverse = min(get(WM.ref(wm, nw, :pipe, a), "flow_max_reverse", 0.0), 0.0)
     q_min_forward = max(get(WM.ref(wm, nw, :pipe, a), "flow_min_forward", 0.0), 0.0)
 
@@ -82,9 +83,10 @@ function constraint_pipe_head_nonlinear(wm::WM.AbstractWaterModel, a::Int; nw::I
     node_fr, node_to = WM.ref(wm, nw, :pipe, a)["node_fr"], WM.ref(wm, nw, :pipe, a)["node_to"]
     exponent, L = WM.ref(wm, nw, :alpha), WM.ref(wm, nw, :pipe, a)["length"]
     base_length = get(wm.data, "base_length", 1.0)
+    base_mass = get(wm.data, "base_mass", 1.0)
     base_time = get(wm.data, "base_time", 1.0)
 
-    r = WM._calc_pipe_resistance(WM.ref(wm, nw, :pipe, a), wm.data["head_loss"], wm.data["viscosity"], base_length, base_time)
+    r = WM._calc_pipe_resistance(WM.ref(wm, nw, :pipe, a), wm.data["head_loss"], wm.data["viscosity"], base_length, base_mass, base_time)
     q_max_reverse = min(get(WM.ref(wm, nw, :pipe, a), "flow_max_reverse", 0.0), 0.0)
     q_min_forward = max(get(WM.ref(wm, nw, :pipe, a), "flow_min_forward", 0.0), 0.0)
 

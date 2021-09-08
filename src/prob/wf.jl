@@ -349,7 +349,13 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
     # Get all network IDs in the multinetwork.
     network_ids = sort(collect(WM.nw_ids(wm)))
 
-    for n in network_ids[1:end-1]
+    if length(network_ids) > 1
+        network_ids_inner = network_ids[1:end-1]
+    else
+        network_ids_inner = network_ids
+    end
+
+    for n in network_ids_inner
         # Physical variables.
         WM.variable_head(wm; nw=n)
         WM.variable_flow(wm; nw=n)
@@ -441,50 +447,29 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
         constraint_strong_duality(wm; nw=n)
     end
 
-    # n_1 = network_ids[1]
-
-    # for n_2 in network_ids[2:end-1]
-    #     WM.variable_pump_switch_on(wm; nw = n_2)
-    #     WM.variable_pump_switch_off(wm; nw = n_2)
-
-    #     for (a, pump) in WM.ref(wm, :pump, nw = n_2)
-    #         WM.constraint_pump_switch_on(wm, a, n_1, n_2)
-    #         WM.constraint_pump_switch_off(wm, a, n_1, n_2)
-    #     end
-
-    #     n_1 = n_2
-    # end
-
-    # # Constraints on the total number of pump switches.
-    # for (a, pump) in WM.ref(wm, :pump; nw = network_ids[1])
-    #     WM.constraint_on_off_pump_switch(wm, a, network_ids[2:end-1])
-    # end
-
-    # Initialize head variables for the final time index.
-    WM.variable_head(wm; nw = network_ids[end])
-
     # Start with the first network, representing the initial time step.
     n_1 = network_ids[1]
 
     # Constraints on tank volumes.
-    for (i, tank) in WM.ref(wm, :tank; nw = n_1)
+    for i in WM.ids(wm, :tank; nw = n_1)
         # Set initial conditions of tanks.
         WM.constraint_tank_volume(wm, i; nw = n_1)
-        constraint_tank_nonlinear(wm, i; nw = n_1)
     end
 
-    # Constraints on tank volumes.
-    for n_2 in network_ids[2:end]
-        # Constrain tank volumes after the initial time step.
-        for (i, tank) in WM.ref(wm, :tank; nw = n_2)
-            WM.constraint_tank_volume(wm, i, n_1, n_2)
+    if length(network_ids) > 1
+        # Initialize head variables for the final time index.
+        WM.variable_head(wm; nw = network_ids[end])
 
-            if n_2 != network_ids[end]
-                constraint_tank_nonlinear(wm, i; nw = n_2)
+        # Constraints on tank volumes.
+        for n_2 in network_ids[2:end]
+            # Constrain tank volumes after the initial time index.
+            for i in WM.ids(wm, :tank; nw = n_2)
+                WM.constraint_tank_volume(wm, i, n_1, n_2)
             end
-        end
 
-        n_1 = n_2 # Update the first network used for integration.
+            # Update the first network used for integration.
+            n_1 = n_2
+        end
     end
 
     # Add the objective.

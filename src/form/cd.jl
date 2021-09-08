@@ -165,6 +165,7 @@ end
 """
 function constraint_strong_duality(wm::AbstractCDModel)
     base_length = get(wm.data, "base_length", 1.0)
+    base_mass = get(wm.data, "base_length", 1.0)
     base_time = get(wm.data, "base_time", 1.0)
     alpha = WM._get_alpha_min_1(wm) + 1.0
     
@@ -175,7 +176,9 @@ function constraint_strong_duality(wm::AbstractCDModel)
     f_3, f_4 = Array{Any, 1}([0.0]), Array{Any, 1}([0.0])
     f_5, f_6 = Array{Any, 1}([0.0]), Array{Any, 1}([0.0])
 
-    for (n, network) in WM.nws(wm)
+    nw_ids = sort(collect(WM.nw_ids(wm)))
+
+    for n in nw_ids[1:end-1]
         # Get head variables.
         h = WM.var(wm, n, :h)
 
@@ -206,7 +209,7 @@ function constraint_strong_duality(wm::AbstractCDModel)
         z_pump = WM.var(wm, n, :z_pump)
         
         for (a, pipe) in WM.ref(wm, n, :pipe)
-            L_x_r = pipe["length"] * WM._calc_pipe_resistance(pipe, pipe_type, viscosity, base_length, base_time)
+            L_x_r = pipe["length"] * WM._calc_pipe_resistance(pipe, pipe_type, viscosity, base_length, base_mass, base_time)
             push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qp_pipe[a])))
             push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qn_pipe[a])))
             push!(f_3, JuMP.@NLexpression(wm.model, L_x_r^(-1.0 / alpha) * head_loss_dh(dhp_pipe[a])))
@@ -214,7 +217,7 @@ function constraint_strong_duality(wm::AbstractCDModel)
         end
 
         for (a, des_pipe) in WM.ref(wm, n, :des_pipe)
-            L_x_r = des_pipe["length"] * WM._calc_pipe_resistance(des_pipe, pipe_type, viscosity, base_length, base_time)
+            L_x_r = des_pipe["length"] * WM._calc_pipe_resistance(des_pipe, pipe_type, viscosity, base_length, base_mass, base_time)
             push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qp_des_pipe[a])))
             push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qn_des_pipe[a])))
             push!(f_3, JuMP.@NLexpression(wm.model, L_x_r^(-1.0 / alpha) * head_loss_dh(dhp_des_pipe[a])))
@@ -231,7 +234,7 @@ function constraint_strong_duality(wm::AbstractCDModel)
                 0.5 * c[2] * qp_pump[a]^2 + c[3] * qp_pump[a]))
 
             push!(f_6, JuMP.@NLexpression(wm.model,
-                ((-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
+                z_pump[a] * ((-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
                 c[2])^3 / (24.0 * c[1]^2) + (c[2] * (-sqrt(-4.0 * c[1] * c[3] + 4.0 *
                 c[1] * g_pump[a] + c[2]^2) - c[2])^2) / (8.0 * c[1]^2) + (c[3] *
                 (-sqrt(-4.0 * c[1] * c[3] + 4.0 * c[1] * g_pump[a] + c[2]^2) -
@@ -262,7 +265,7 @@ function constraint_strong_duality(wm::AbstractCDModel)
 
         for (i, tank) in WM.ref(wm, n, :tank)
             # TODO: How should we convexify this?
-            head = tank["init_level"] + WM.ref(wm, n, :node, tank["node"])["elevation"]
+            head = tank["init_level"] + WM.ref(wm, n, :node, tank["node"], "elevation")
             push!(f_4, JuMP.@NLexpression(wm.model, -q_tank[i] * head))
         end
     end
