@@ -112,7 +112,7 @@ function solve_obbt_owf_switching!(
     use_relaxed_network && WM.relax_network!(data)
 
     # Set the problem specification that will be used for bound tightening.
-    build_type = WM._IM.ismultinetwork(WM.get_wm_data(data)) ? WM.build_mn_wf_switching : WM.build_wf
+    build_type = WM._IM.ismultinetwork(WM.get_wm_data(data)) ? WM.build_mn_owf_switching : WM.build_wf
 
     # Check for keyword argument inconsistencies.
     WM._check_obbt_options(upper_bound, upper_bound_constraint)
