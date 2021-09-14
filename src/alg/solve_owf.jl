@@ -72,8 +72,14 @@ end
 
 
 function add_pairwise_cuts(wm::WM.AbstractWaterModel, cuts::Array{WM._PairwiseCut, 1})
+    if WM.ismultinetwork(wm) && length(WM.nw_ids(wm)) > 1
+        nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
+    else
+        nw_ids = sort(collect(WM.nw_ids(wm)))
+    end
+
     # Add the pairwise cuts obtained from the relaxed problem to the OWF problem.
-    for nw_id in sort(collect(WM.nw_ids(wm)))[1:end-1]
+    for nw_id in nw_ids
          # Use the same cuts for all subnetworks of the multinetwork.
         map(x -> x.variable_index_1.network_index = nw_id, cuts)
         map(x -> x.variable_index_2.network_index = nw_id, cuts)
