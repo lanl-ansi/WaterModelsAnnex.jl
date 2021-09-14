@@ -61,7 +61,7 @@ function WM.constraint_on_off_pump_power_custom(wm::AbstractNCZModel, n::Int, a:
     q = WM.var(wm, n, :q_pump, a)
     P = WM.var(wm, n, :P_pump, a)
     z = WM.var(wm, n, :z_pump, a)
-    
+ 
     # Add constraint equating power with respect to the linear power curve.
     c = JuMP.@constraint(wm.model, z * (power_fixed + power_variable * q) == z * P)
 

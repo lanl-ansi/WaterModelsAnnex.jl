@@ -288,9 +288,9 @@ function objective_min_losses(wm::WM.AbstractWaterModel, nws::Vector{Int})
             objective += dhp + dhn
         end
 
-        for pump in values(WM.ref(wm, nw, :pump))
-            objective -= WM.var(wm, nw, :g_pump, pump["index"])
-        end
+        # for pump in values(WM.ref(wm, nw, :pump))
+            # objective -= WM.var(wm, nw, :g_pump, pump["index"])
+        # end
 
         # for tank in values(WM.ref(wm, nw, :tank))
         #     node = WM.ref(wm, nw, :node, tank["node"])
@@ -434,6 +434,40 @@ function run_sequential_heuristic(
     return control_settings
     #return nothing
 end
+
+
+# function objective_min_losses(wm::WM.AbstractWaterModel, nws::Vector{Int})
+#     objective = JuMP.AffExpr(0.0)
+
+#     for nw in nws
+#         for tank in values(WM.ref(wm, nw, :tank))
+#             # head_min = WM.ref(wm, nw, :node, tank["node"], "head_min")
+#             # head_max = WM.ref(wm, nw, :node, tank["node"], "head_max")
+#             # head_mid = 0.5 * (head_min + head_max)
+#             # objective += WM.var(wm, nw, :V, tank["index"])
+#         end
+
+#         # for pipe in values(WM.ref(wm, nw, :pipe))
+#         #     dhp = WM.var(wm, nw, :dhp_pipe, pipe["index"])
+#         #     dhn = WM.var(wm, nw, :dhn_pipe, pipe["index"])
+#         #     objective += dhp + dhn
+#         # end
+
+#         for pump in values(WM.ref(wm, nw, :pump))
+#             objective -= WM.var(wm, nw, :g_pump, pump["index"])
+#             # objective += WM.var(wm, nw, :z_pump, pump["index"])
+#         end
+
+#         # for tank in values(WM.ref(wm, nw, :tank))
+#         #     node = WM.ref(wm, nw, :node, tank["node"])
+#         #     h = WM.var(wm, nw, :h, tank["node"])            
+#         #     head_mid = node["head_min"] + 0.5 * (node["head_max"] - node["head_min"])
+#         #     objective += (h - head_mid)^2
+#         # end
+#     end
+
+#     JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
+# end
 
 
 function run_heuristic_mn(network_mn::Dict{String, <:Any}, mip_optimizer, nlp_optimizer, time_limit::Float64)

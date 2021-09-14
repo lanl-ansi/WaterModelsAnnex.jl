@@ -24,8 +24,11 @@ end
     objective_wf(wm::AbstractCDXModel)
 """
 function constraint_strong_duality(wm::AbstractCDXModel)
-    base_length = get(wm.data, "base_length", 1.0)
-    base_time = get(wm.data, "base_time", 1.0)
+    wm_data = WM.get_wm_data(wm.data)
+
+    base_length = get(wm_data, "base_length", 1.0)
+    base_mass = get(wm_data, "base_mass", 1.0)
+    base_time = get(wm_data, "base_time", 1.0)
     alpha = WM._get_alpha_min_1(wm) + 1.0
     
     pipe_type = wm.ref[:it][WM.wm_it_sym][:head_loss]
@@ -66,7 +69,7 @@ function constraint_strong_duality(wm::AbstractCDXModel)
         z_pump = WM.var(wm, n, :z_pump)
         
         for (a, pipe) in WM.ref(wm, n, :pipe)
-            L_x_r = pipe["length"] * WM._calc_pipe_resistance(pipe, pipe_type, viscosity, base_length, base_time)
+            L_x_r = pipe["length"] * WM._calc_pipe_resistance(pipe, pipe_type, viscosity, base_length, base_mass, base_time)
             push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qp_pipe[a])))
             push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qn_pipe[a])))
             push!(f_3, JuMP.@NLexpression(wm.model, L_x_r^(-1.0 / alpha) * head_loss_dh(dhp_pipe[a])))
@@ -74,7 +77,7 @@ function constraint_strong_duality(wm::AbstractCDXModel)
         end
 
         for (a, des_pipe) in WM.ref(wm, n, :des_pipe)
-            L_x_r = des_pipe["length"] * WM._calc_pipe_resistance(des_pipe, pipe_type, viscosity, base_length, base_time)
+            L_x_r = des_pipe["length"] * WM._calc_pipe_resistance(des_pipe, pipe_type, viscosity, base_length, base_mass, base_time)
             push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qp_des_pipe[a])))
             push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qn_des_pipe[a])))
             push!(f_3, JuMP.@NLexpression(wm.model, L_x_r^(-1.0 / alpha) * head_loss_dh(dhp_des_pipe[a])))
@@ -120,8 +123,9 @@ function constraint_strong_duality(wm::AbstractCDXModel)
 
         for (i, tank) in WM.ref(wm, n, :tank)
             # TODO: How should we convexify this?
-            head = tank["init_level"] + WM.ref(wm, n, :node, tank["node"])["elevation"]
-            push!(f_4, JuMP.@NLexpression(wm.model, -q_tank[i] * head))
+            #head = tank["init_level"] + WM.ref(wm, n, :node, tank["node"])["elevation"]
+            #push!(f_4, JuMP.@NLexpression(wm.model, -q_tank[i] * head))
+            push!(f_4, JuMP.@NLexpression(wm.model, -q_tank[i] * h[tank["node"]]))
         end
     end
 

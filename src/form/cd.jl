@@ -265,8 +265,9 @@ function constraint_strong_duality(wm::AbstractCDModel)
 
         for (i, tank) in WM.ref(wm, n, :tank)
             # TODO: How should we convexify this?
-            head = tank["init_level"] + WM.ref(wm, n, :node, tank["node"], "elevation")
-            push!(f_4, JuMP.@NLexpression(wm.model, -q_tank[i] * head))
+            #head = tank["init_level"] + WM.ref(wm, n, :node, tank["node"], "elevation")
+            #push!(f_4, JuMP.@NLexpression(wm.model, -q_tank[i] * head))
+            push!(f_4, JuMP.@NLexpression(wm.model, -q_tank[i] * h[tank["node"]]))
         end
     end
 
@@ -277,4 +278,12 @@ function constraint_strong_duality(wm::AbstractCDModel)
         sum(f_4[k] for k in 1:length(f_4)) -
         sum(f_5[k] for k in 1:length(f_5)) +
         sum(f_6[k] for k in 1:length(f_6)))
+
+    # JuMP.@NLconstraint(wm.model,
+    #     sum(f_1[k] for k in 1:length(f_1)) -
+    #     sum(f_2[k] for k in 1:length(f_2)) +
+    #     sum(f_3[k] for k in 1:length(f_3)) +
+    #     sum(f_4[k] for k in 1:length(f_4)) -
+    #     sum(f_5[k] for k in 1:length(f_5)) +
+    #     sum(f_6[k] for k in 1:length(f_6)) <= 1.0e-2)
 end
