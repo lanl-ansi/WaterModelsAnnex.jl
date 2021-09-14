@@ -118,22 +118,27 @@ function solve_obbt_owf_switching!(
     WM._check_obbt_options(upper_bound, upper_bound_constraint)
 
     # Instantiate the bound tightening model and relax integrality, if requested.
-    wms = [WM.instantiate_model(data, model_type, build_type) for i in 1:Threads.nthreads()]
+    wms = Vector{WM.AbstractWaterModel}(undef, Threads.nthreads())
 
-    # Add pairwise cuts to the models.
-    map(x -> add_pairwise_cuts(x, cuts), wms)
+    # Update WaterModels objects in parallel.
+    Threads.@threads for i in 1:Threads.nthreads()
+        wms[i] = WM.instantiate_model(data, model_type, build_type)
 
-    if upper_bound_constraint
-        map(x -> WM._constraint_obj_bound(x, upper_bound), wms)
+        # Add pairwise cuts to the models.
+        add_pairwise_cuts(wms[i], cuts)
+
+        if upper_bound_constraint
+            WM._constraint_obj_bound(wms[i], upper_bound)
+        end
+
+        if solve_relaxed
+            # Relax the binary variables if requested.
+            WM.relax_all_binary_variables!(wms[i])
+        end
+
+        # Set the optimizer for the bound tightening model.
+        JuMP.set_optimizer(wms[i].model, optimizer)
     end
-
-    if solve_relaxed
-        # Relax the binary variables if requested.
-        map(x -> WM.relax_all_binary_variables!(x), wms)
-    end
-
-    # Set the optimizer for the bound tightening model.
-    map(x -> JuMP.set_optimizer(x.model, optimizer), wms)
 
     # Collect all problems.
     bound_problems = WM._get_bound_problems(wms[1]; limit = limit_problems)
@@ -170,23 +175,26 @@ function solve_obbt_owf_switching!(
         # Update algorithm metadata.
         current_iteration += 1
 
-        # Set up the next optimization problem using the new bounds.
-        wms = [WM.instantiate_model(data, model_type, build_type) for i in 1:Threads.nthreads()]
+        # Update WaterModels objects in parallel.
+        Threads.@threads for i in 1:Threads.nthreads()
+            # Set up the next optimization problem using the new bounds.
+            wms[i] = WM.instantiate_model(data, model_type, build_type)
 
-        # Add pairwise cuts to the models.
-        map(x -> add_pairwise_cuts(x, cuts), wms)
+            # Add pairwise cuts to the models.
+            add_pairwise_cuts(wms[i], cuts)
 
-        if upper_bound_constraint
-            map(x -> WM._constraint_obj_bound(x, upper_bound), wms)
+            if upper_bound_constraint
+                WM._constraint_obj_bound(wms[i], upper_bound)
+            end
+
+            if solve_relaxed
+                # Relax the binary variables if requested.
+                WM.relax_all_binary_variables!(wms[i])
+            end
+
+            # Set the optimizer for the bound tightening model.
+            JuMP.set_optimizer(wms[i].model, optimizer)
         end
-
-        if solve_relaxed
-            # Relax the binary variables if requested.
-            map(x -> WM.relax_all_binary_variables!(x), wms)
-        end
-
-        # Set the optimizer for the bound tightening model.
-        map(x -> JuMP.set_optimizer(x.model, optimizer), wms)
 
         # Set the termination variable if max iterations is exceeded.
         current_iteration >= max_iter && (terminate = true)
