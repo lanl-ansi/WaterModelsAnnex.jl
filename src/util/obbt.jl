@@ -122,10 +122,10 @@ function solve_obbt_owf_switching!(
 
     # Update WaterModels objects in parallel.
     Threads.@threads for i in 1:Threads.nthreads()
-        wms[i] = WM.instantiate_model(data, model_type, build_type)
+        wms[i] = WM.instantiate_model(deepcopy(data), model_type, build_type)
 
         # Add pairwise cuts to the models.
-        add_pairwise_cuts(wms[i], cuts)
+        add_pairwise_cuts(wms[i], deepcopy(cuts))
 
         if upper_bound_constraint
             WM._constraint_obj_bound(wms[i], upper_bound)
@@ -178,10 +178,10 @@ function solve_obbt_owf_switching!(
         # Update WaterModels objects in parallel.
         Threads.@threads for i in 1:Threads.nthreads()
             # Set up the next optimization problem using the new bounds.
-            wms[i] = WM.instantiate_model(data, model_type, build_type)
+            wms[i] = WM.instantiate_model(deepcopy(data), model_type, build_type)
 
             # Add pairwise cuts to the models.
-            add_pairwise_cuts(wms[i], cuts)
+            add_pairwise_cuts(wms[i], deepcopy(cuts))
 
             if upper_bound_constraint
                 WM._constraint_obj_bound(wms[i], upper_bound)
