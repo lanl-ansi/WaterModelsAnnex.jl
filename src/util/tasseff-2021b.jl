@@ -41,3 +41,36 @@ function run_obbt_mn!(network_mn::Dict{String, <:Any}, cuts_path::String, time_l
         cuts = load_pairwise_cuts(cuts_path), max_iter = 9999, solve_relaxed = false,
         flow_partition_func = flow_partition_func);
 end
+
+
+function solve_owf_upper_bounds(network_mn::Dict, network::Dict, cuts_path::String, build_method::Function, formulation::Type, mip_optimizer, nlp_optimizer)
+    # Solve a continuously-relaxed version of the problem.
+    wm_micp = WM.instantiate_model(network_mn, formulation, build_method)
+    WM.JuMP.set_optimizer(wm_micp.model, nlp_optimizer)
+    WM.optimize_model!(wm_micp; relax_integrality = true)
+
+    # Instantiate the model and add cutting planes.
+    wm = WM.instantiate_model(network_mn, formulation, build_method)
+    add_pairwise_cuts(wm, load_pairwise_cuts(cuts_path))
+ 
+    # Set the optimizer and other important solver parameters.   
+    WM.JuMP.set_optimizer(wm.model, mip_optimizer)
+    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+
+    # TODO: Remove this once Gurobi.jl interface is fixed.
+    wm.model.moi_backend.optimizer.model.has_generic_callback = false
+
+    # Add the lazy cut callback.
+    lazy_cut_stats = add_owf_lazy_cut_callback!(wm, network, nlp_optimizer)    
+
+    # Solve the model and store the result.
+    result = WM.optimize_model!(wm)
+
+    # Add true upper bound data to the result dictionary.
+    result["true_upper_bound"] = lazy_cut_stats.best_cost
+    result["true_gap"] = (result["true_upper_bound"] -
+        result["objective_lb"]) / result["true_upper_bound"]
+
+    # Return the result dictionary.
+    return result
+end
