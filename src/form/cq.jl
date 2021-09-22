@@ -29,16 +29,16 @@ function WM.constraint_flow_conservation(
     
     if length(pump_fr) > 0 || length(pump_to) > 0
         z_pump = length(qp_pump) > 0 ? WM.var(wm, n, :z_pump) : 0.0
-        q_pump_fr = JuMP.@NLexpression(wm.model, sum(z_pump[a] * (qp_pump[a] - qn_pump[a]) for a in pump_fr))
-        q_pump_to = JuMP.@NLexpression(wm.model, sum(z_pump[a] * (qp_pump[a] - qn_pump[a]) for a in pump_to))
+        q_pump_fr = JuMP.@NLexpression(wm.model, sum(z_pump[a] * (qp_pump[a]) for a in pump_fr))
+        q_pump_to = JuMP.@NLexpression(wm.model, sum(z_pump[a] * (qp_pump[a]) for a in pump_to))
     else
         q_pump_fr = q_pump_to = 0.0
     end
 
     if length(regulator_fr) > 0 || length(regulator_to) > 0
         z_regulator = length(qp_regulator) > 0 ? WM.var(wm, n, :z_regulator) : 0.0
-        q_regulator_fr = JuMP.@NLexpression(wm.model, sum(z_regulator[a] * (qp_regulator[a] - qn_regulator[a]) for a in regulator_fr))
-        q_regulator_to = JuMP.@NLexpression(wm.model, sum(z_regulator[a] * (qp_regulator[a] - qn_regulator[a]) for a in regulator_to))
+        q_regulator_fr = JuMP.@NLexpression(wm.model, sum(z_regulator[a] * (qp_regulator[a]) for a in regulator_fr))
+        q_regulator_to = JuMP.@NLexpression(wm.model, sum(z_regulator[a] * (qp_regulator[a]) for a in regulator_to))
     else
         q_regulator_fr = q_regulator_to = 0.0
     end
@@ -51,7 +51,7 @@ function WM.constraint_flow_conservation(
         q_valve_fr = q_valve_to = 0.0
     end
    
-    if !isapprox(fixed_demand, 0.0; atol = 1.0e-7)
+    if !isapprox(fixed_demand, 0.0; atol = 1.0e-9)
         fixed_demand_val = wm.model[:fixed_demands][i]
     else
         fixed_demand_val = 0.0
@@ -166,7 +166,6 @@ function update_fixed_demand(wm::AbstractCQModel, data::Dict{Int, Float64}; nw::
 end
 
 
-
 ""
 function update_parameters(wm::AbstractCQModel, data::Dict{String, <:Any}; nw::Int = WM.nw_id_default)
     update_pump_indicator(wm, data["pump"]; nw = nw)
@@ -251,7 +250,7 @@ function objective_strong_duality(wm::AbstractCQModel)
         for (i, reservoir) in WM.ref(wm, n, :reservoir)
             push!(f_2, JuMP.@NLexpression(wm.model,
                 q_reservoir[i] * h_reservoir[reservoir["node"]]))
-         end
+        end
     end
 
     JuMP.@NLobjective(wm.model, WM._MOI.MIN_SENSE,

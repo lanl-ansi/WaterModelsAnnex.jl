@@ -19,8 +19,8 @@ end
 
 function run_obbt_mn_relaxed!(network_mn::Dict{String, <:Any}, cuts_path::String, time_limit::Float64, optimizer)
     # Set flow partitioning scheme.
-    WM.set_flow_partitions_si!(network_mn, 10.0, 1.0e-4);
-    flow_partition_func = x -> WM.set_flow_partitions_si!(x, 10.0, 1.0e-4);
+    WM.set_flow_partitions_si!(network_mn, 100.0, 1.0e-4);
+    flow_partition_func = x -> WM.set_flow_partitions_si!(x, 100.0, 1.0e-4);
 
     # Run a continuous relaxation-based OBBT on the data.
     solve_obbt_owf_switching!(network_mn, optimizer; use_relaxed_network = false,
@@ -32,8 +32,8 @@ end
 
 function run_obbt_mn!(network_mn::Dict{String, <:Any}, cuts_path::String, time_limit::Float64, optimizer)
     # Set flow partitioning scheme.
-    WM.set_flow_partitions_si!(network_mn, 10.0, 1.0e-4);
-    flow_partition_func = x -> WM.set_flow_partitions_si!(x, 10.0, 1.0e-4);
+    WM.set_flow_partitions_si!(network_mn, 100.0, 1.0e-4);
+    flow_partition_func = x -> WM.set_flow_partitions_si!(x, 100.0, 1.0e-4);
 
     # Run a PWLRD-based OBBT on the data.
     solve_obbt_owf_switching!(network_mn, optimizer; use_relaxed_network = false,
@@ -53,12 +53,12 @@ function solve_owf_upper_bounds(network_mn::Dict, network::Dict, cuts_path::Stri
     wm = WM.instantiate_model(network_mn, formulation, build_method)
     add_pairwise_cuts(wm, load_pairwise_cuts(cuts_path))
  
-    # Set the optimizer and other important solver parameters.   
+    # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, mip_optimizer)
-    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+    #WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
 
     # TODO: Remove this once Gurobi.jl interface is fixed.
-    wm.model.moi_backend.optimizer.model.has_generic_callback = false
+    #wm.model.moi_backend.optimizer.model.has_generic_callback = false
 
     # Add the lazy cut callback.
     lazy_cut_stats = add_owf_lazy_cut_callback!(wm, network, nlp_optimizer)    

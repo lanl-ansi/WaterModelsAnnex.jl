@@ -22,7 +22,7 @@ function compare_variable_indices(var_1::WM._VariableIndex, var_2::WM._VariableI
 end
 
 
-function set_parameters_from_control_setting!(wm::AbstractCQModel, control_setting::ControlSetting)    
+function set_parameters_from_control_setting!(wm::AbstractCQModel, control_setting::ControlSetting)
     for (i, v) in enumerate(control_setting.variable_indices)
         symbol, id = v.variable_symbol, v.component_index
         JuMP.set_value(WM.var(wm, symbol)[id], control_setting.vals[i])
@@ -91,10 +91,11 @@ function get_pipe_flow_expression(wm::AbstractCQModel, arc::Arc)::Float64
     pipe = WM.ref(wm, :pipe, arc.index)
     q = JuMP.value(WM.var(wm, :q_pipe, arc.index))
     exponent, L = WM.ref(wm, :alpha), pipe["length"]
-    head_loss, viscosity = wm.data["head_loss"], wm.data["viscosity"]
 
     data = WM.get_wm_data(wm.data)
 
+    head_loss = data["head_loss"]
+    viscosity = data["viscosity"]
     base_length = get(data, "base_length", 1.0)
     base_mass = get(data, "base_mass", 1.0)
     base_time = get(data, "base_time", 1.0)
@@ -203,15 +204,15 @@ function flows_are_feasible(wm::AbstractCQModel)::Bool
         if symbol in [:des_pipe, :pump, :regulator, :valve]
             z = JuMP.value.(WM.var.(Ref(wm), Symbol("z_" * string(symbol)), component_ids))
             vals = round.(z) .* (qp .- qn)
-            lbs = [WM.ref(wm, symbol, i, "flow_min") - 1.0e-6 for i in component_ids]
-            ubs = [WM.ref(wm, symbol, i, "flow_max") + 1.0e-6 for i in component_ids]
+            lbs = [WM.ref(wm, symbol, i, "flow_min") for i in component_ids]
+            ubs = [WM.ref(wm, symbol, i, "flow_max") for i in component_ids]
         else
             vals = qp .- qn
-            lbs = [WM.ref(wm, symbol, i, "flow_min") - 1.0e-6 for i in component_ids]
-            ubs = [WM.ref(wm, symbol, i, "flow_max") + 1.0e-6 for i in component_ids]
+            lbs = [WM.ref(wm, symbol, i, "flow_min") for i in component_ids]
+            ubs = [WM.ref(wm, symbol, i, "flow_max") for i in component_ids]
         end
 
-        if !(all(vals .>= lbs) && all(vals .<= ubs))
+        if !(all(vals .>= lbs .- 1.0e-6) && all(vals .<= ubs .+ 1.0e-6))
             return false
         end
     end
@@ -326,7 +327,6 @@ end
 function check_simulation_feasibility(wm::AbstractCQModel)::Bool
     solved = JuMP.termination_status(wm.model) === WM._MOI.LOCALLY_SOLVED
     almost_solved = JuMP.termination_status(wm.model) === WM._MOI.ALMOST_LOCALLY_SOLVED
-    # println(JuMP.termination_status(wm.model))
     return solved || almost_solved ? check_physical_feasibility(wm) : false
 end
 
@@ -353,9 +353,6 @@ function set_tank_heads!(wm::AbstractCQModel)
         head = node["elevation"] + tank["init_level"]
         var = wm.model[:h_tank][node["index"]]
         JuMP.set_value(var, head)
-        
-        # head_min, head_max = node["head_min"], node["head_max"]
-        # println(WM.ref(wm, :node, node["index"], "source_id"), " ", head_min, " ", head_max, " ", head)
     end
 end
 

@@ -1,4 +1,5 @@
 function compute_pairwise_cuts(network::Dict{String, Any}, cuts_path::String, optimizer)
+
     # Load the existing cuts.
     cuts = load_pairwise_cuts(cuts_path)
 
@@ -10,7 +11,7 @@ function compute_pairwise_cuts(network::Dict{String, Any}, cuts_path::String, op
 
     # Update WaterModels objects in parallel.
     Threads.@threads for i in 1:Threads.nthreads()
-        wms[i] = WM.instantiate_model(deepcopy(data), WM.PWLRDWaterModel, WM.build_owf)
+        wms[i] = WM.instantiate_model(deepcopy(network), WM.PWLRDWaterModel, WM.build_owf)
 
         # Add existing pairwise cuts to the models.
         add_pairwise_cuts(wms[i], deepcopy(cuts))
@@ -30,7 +31,10 @@ function compute_pairwise_cuts(network::Dict{String, Any}, cuts_path::String, op
         push!(cuts_array, Array{WM._PairwiseCut, 1}([]))
     end
 
-    Threads.@threads for i in 1:length(problem_sets)
+    # Write something to the logger to say the process has started.
+    WM.Memento.info(LOGGER, "Beginning cut preprocessing routine.")
+
+    cut_time = @elapsed Threads.@threads for i in 1:length(problem_sets)
         # Compute pairwise cuts across all problem sets.
         cuts_local = WM._compute_pairwise_cuts!(wms[Threads.threadid()], [problem_sets[i]])
         append!(cuts_array[Threads.threadid()], cuts_local)
@@ -38,6 +42,9 @@ function compute_pairwise_cuts(network::Dict{String, Any}, cuts_path::String, op
 
     # Concatenate all cutting plane results.
     cuts = vcat(cuts, vcat(cuts_array...))
+
+    # Write something to the logger to say the process has ended.
+    WM.Memento.info(LOGGER, "Pairwise cut preprocessing completed in $(cut_time) seconds.")
 
     # Return the data structure comprising cuts.
     return cuts

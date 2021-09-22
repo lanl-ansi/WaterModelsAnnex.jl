@@ -194,8 +194,8 @@ end
 function add_feasibility_cut!(wm::WM.AbstractWaterModel, cb_data, nw_last::Int)    
     # Collect the current integer solution into "zero" and "one" buckets.
     vars = _get_indicator_variables_to_nw(wm, nw_last)
-    zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 0.0, vars)
-    one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) == 1.0, vars)
+    zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) < 0.5, vars)
+    one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) >= 0.5, vars)
 
     # If the solution is not feasible (according to a comparison with WNTR), add a no-good cut.
     con = WM.JuMP.@build_constraint(sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
@@ -413,7 +413,7 @@ function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, optimizer
             id_infeasible = findfirst(x -> !x.feasible, simulation_results)
             nw_infeasible = network_ids[id_infeasible]
             stats.time_elapsed += @elapsed add_feasibility_cut!(wm, cb_data, nw_infeasible)
-            # WM.Memento.info(LOGGER, "Infeasible solution found at step $(infeasible_nw).")
+            # WM.Memento.info(LOGGER, "Infeasible solution found at step $(nw_infeasible).")
         else
             cost = sum(x.cost for x in simulation_results)
             WM.Memento.info(LOGGER, "Found feasible solution with cost $(cost).")
