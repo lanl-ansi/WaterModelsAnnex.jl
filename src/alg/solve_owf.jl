@@ -1,13 +1,23 @@
-function compute_pairwise_cuts(network::Dict{String, Any}, optimizer)
+function compute_pairwise_cuts(network::Dict{String, Any}, cuts_path::String, optimizer)
+    # Load the existing cuts.
+    cuts = load_pairwise_cuts(cuts_path)
+
     # Relax the network.
     WM._relax_network!(network)
 
     # Construct independent thread-local WaterModels objects.
-    wms = [WM.instantiate_model(network, WM.PWLRDWaterModel,
-        WM.build_owf) for i in 1:Threads.nthreads()]
+    wms = Vector{WM.AbstractWaterModel}(undef, Threads.nthreads())
 
-    # Set the optimizer for the WaterModels objects.
-    map(x -> JuMP.set_optimizer(x.model, optimizer), wms)
+    # Update WaterModels objects in parallel.
+    Threads.@threads for i in 1:Threads.nthreads()
+        wms[i] = WM.instantiate_model(deepcopy(data), WM.PWLRDWaterModel, WM.build_owf)
+
+        # Add existing pairwise cuts to the models.
+        add_pairwise_cuts(wms[i], deepcopy(cuts))
+
+        # Set the optimizer for the bound tightening model.
+        JuMP.set_optimizer(wms[i].model, optimizer)
+    end
 
     # Get problem sets for generating pairwise cuts.
     problem_sets = WM._get_pairwise_problem_sets(wms[1])
@@ -27,12 +37,7 @@ function compute_pairwise_cuts(network::Dict{String, Any}, optimizer)
     end
 
     # Concatenate all cutting plane results.
-    cuts = vcat(cuts_array...)
-
-    # Unrelax the network.
-    WM._fix_demands!(network)
-    WM._fix_tanks!(network)
-    WM._fix_reservoirs!(network)
+    cuts = vcat(cuts, vcat(cuts_array...))
 
     # Return the data structure comprising cuts.
     return cuts
