@@ -236,7 +236,7 @@ function WM.build_mn_wf(wm::AbstractCDModel)
 end
 
 
-function WM.build_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
+function WM.build_wf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
     # Create head loss functions, if necessary.
     WM._function_head_loss(wm)
 
@@ -342,7 +342,7 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
 end
 
 
-function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
+function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
     # Create head loss functions, if necessary.
     WM._function_head_loss(wm)
 
@@ -477,7 +477,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
 end
 
 
-function WM.build_mn_owf(wm::Union{AbstractCDXModel, AbstractLRDXModel})
+function WM.build_mn_owf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
     # Build the water flow problem.
     WM.build_mn_wf(wm)
 

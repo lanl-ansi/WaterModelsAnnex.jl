@@ -71,7 +71,7 @@ end
 
 function construct_owf_model(network_mn::Dict{String, Any}, owf_optimizer; use_pwlrd::Bool = true, kwargs...)
     # Specify model options and construct the multinetwork OWF model.
-    model_type = use_pwlrd ? WM.PWLRDWaterModel : LRDXWaterModel
+    model_type = use_pwlrd ? WM.PWLRDWaterModel : PWLRDXWaterModel
     wm = WM.instantiate_model(network_mn, model_type, WM.build_mn_owf)
 
     # Set the optimizer and other important solver parameters.
@@ -259,7 +259,7 @@ function solve_owf_upper_bounds_lrdx(network_mn::Dict, pc_path::String, mip_opti
     WM.optimize_model!(wm_micp; relax_integrality = true)
 
     # Set the optimizer and other important solver parameters.
-    wm = WM.instantiate_model(network_mn, LRDXWaterModel, WM.build_mn_owf)
+    wm = WM.instantiate_model(network_mn, PWLRDXWaterModel, WM.build_mn_owf)
     WM.JuMP.set_optimizer(wm.model, mip_optimizer)
     WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
 

@@ -77,7 +77,7 @@ function _calc_pump_gain_integrated_bound(g::JuMP.VariableRef, z::JuMP.VariableR
 end
 
 
-function variable_pipe_flow_nonlinear(wm::AbstractLRDXModel; nw::Int=WM.nw_id_default, bounded::Bool=true, report::Bool=true)
+function variable_pipe_flow_nonlinear(wm::AbstractPWLRDXModel; nw::Int=WM.nw_id_default, bounded::Bool=true, report::Bool=true)
     # Initialize variables associated with positive flows.
     qp_nl = WM.var(wm, nw)[:qp_nl_pipe] = JuMP.@variable(
         wm.model, [a in WM.ids(wm, nw, :pipe)], lower_bound=0.0, base_name="$(nw)_qp_nl",
@@ -90,7 +90,7 @@ function variable_pipe_flow_nonlinear(wm::AbstractLRDXModel; nw::Int=WM.nw_id_de
 end
 
 
-function variable_pipe_head_difference_nonlinear(wm::AbstractLRDXModel; nw::Int=WM.nw_id_default, bounded::Bool=true, report::Bool=true)
+function variable_pipe_head_difference_nonlinear(wm::AbstractPWLRDXModel; nw::Int=WM.nw_id_default, bounded::Bool=true, report::Bool=true)
     # Initialize variables associated with positive flows.
     dhp_nl = WM.var(wm, nw)[:dhp_nl_pipe] = JuMP.@variable(
         wm.model, [a in WM.ids(wm, nw, :pipe)], lower_bound=0.0, base_name="$(nw)_dhp_nl",
@@ -103,7 +103,7 @@ function variable_pipe_head_difference_nonlinear(wm::AbstractLRDXModel; nw::Int=
 end
 
 
-function variable_pump_flow_nonlinear(wm::AbstractLRDXModel; nw::Int=WM.nw_id_default, bounded::Bool=true, report::Bool=true)
+function variable_pump_flow_nonlinear(wm::AbstractPWLRDXModel; nw::Int=WM.nw_id_default, bounded::Bool=true, report::Bool=true)
     # Initialize variables associated with positive flows.
     qp_nl = WM.var(wm, nw)[:qp_nl_pump] = JuMP.@variable(
         wm.model, [a in WM.ids(wm, nw, :pump)], lower_bound=0.0, base_name="$(nw)_qp_nl",
@@ -111,7 +111,7 @@ function variable_pump_flow_nonlinear(wm::AbstractLRDXModel; nw::Int=WM.nw_id_de
 end
 
 
-function variable_pump_gain_nonlinear(wm::AbstractLRDXModel; nw::Int=WM.nw_id_default, bounded::Bool=true, report::Bool=true)
+function variable_pump_gain_nonlinear(wm::AbstractPWLRDXModel; nw::Int=WM.nw_id_default, bounded::Bool=true, report::Bool=true)
     # Initialize variables associated with positive gain.
     g_nl = WM.var(wm, nw)[:g_nl_pump] = JuMP.@variable(
         wm.model, [a in WM.ids(wm, nw, :pump)], base_name="$(nw)_g_nl",
@@ -119,7 +119,7 @@ function variable_pump_gain_nonlinear(wm::AbstractLRDXModel; nw::Int=WM.nw_id_de
 end
 
 
-function variable_tank_nonlinear(wm::AbstractLRDXModel; nw::Int=WM.nw_id_default, bounded::Bool=true, report::Bool=true)
+function variable_tank_nonlinear(wm::AbstractPWLRDXModel; nw::Int=WM.nw_id_default, bounded::Bool=true, report::Bool=true)
     # Initialize variables associated with tank flow-head nonlinearities.
     qh_nl = WM.var(wm, nw)[:qh_nl_tank] = JuMP.@variable(
         wm.model, [i in WM.ids(wm, nw, :tank)], base_name="$(nw)_qh_nl",
@@ -128,7 +128,7 @@ end
 
 
 function constraint_pipe_flow_nonlinear(
-    wm::AbstractLRDXModel, n::Int, a::Int, node_fr::Int, node_to::Int, exponent::Float64,
+    wm::AbstractPWLRDXModel, n::Int, a::Int, node_fr::Int, node_to::Int, exponent::Float64,
     L::Float64, r::Float64, q_max_reverse::Float64, q_min_forward::Float64)
     # Get the variable for flow directionality.
     y = WM.var(wm, n, :y_pipe, a)
@@ -188,7 +188,7 @@ end
 
 
 function constraint_pipe_head_nonlinear(
-    wm::AbstractLRDXModel, n::Int, a::Int, node_fr::Int, node_to::Int, exponent::Float64,
+    wm::AbstractPWLRDXModel, n::Int, a::Int, node_fr::Int, node_to::Int, exponent::Float64,
     L::Float64, r::Float64, q_max_reverse::Float64, q_min_forward::Float64)
     # Get object from the WaterModels reference dictionary.
     head_loss = wm.ref[:it][WM.wm_it_sym][:head_loss]
@@ -256,7 +256,7 @@ end
 
 
 function constraint_on_off_pump_flow_nonlinear(
-    wm::AbstractLRDXModel, n::Int, a::Int, node_fr::Int,
+    wm::AbstractPWLRDXModel, n::Int, a::Int, node_fr::Int,
     node_to::Int, coeffs::Array{Float64, 1}, q_min_forward::Float64)
     # Get object from the WaterModels reference dictionary.
     pump = WM.ref(wm, n, :pump, a)
@@ -291,7 +291,7 @@ end
 
 
 function constraint_on_off_pump_gain_nonlinear(
-    wm::AbstractLRDXModel, n::Int, a::Int, node_fr::Int,
+    wm::AbstractPWLRDXModel, n::Int, a::Int, node_fr::Int,
     node_to::Int, coeffs::Array{Float64, 1}, q_min_forward::Float64)
     # Get object from the WaterModels reference dictionary.
     pump = WM.ref(wm, n, :pump, a)
@@ -333,7 +333,7 @@ function constraint_on_off_pump_gain_nonlinear(
 end
 
 
-function constraint_tank_nonlinear(wm::AbstractLRDXModel, n::Int, i::Int, node_index::Int)
+function constraint_tank_nonlinear(wm::AbstractPWLRDXModel, n::Int, i::Int, node_index::Int)
     q, h = WM.var(wm, n, :q_tank, i), WM.var(wm, n, :h, node_index)
     qh_nl_tank = WM.var(wm, n, :qh_nl_tank, i)
 
@@ -350,7 +350,7 @@ end
 
 
 ""
-function constraint_strong_duality(wm::AbstractLRDXModel; nw::Int=WM.nw_id_default)
+function constraint_strong_duality(wm::AbstractPWLRDXModel; nw::Int=WM.nw_id_default)
     qp_pipe_nl = sum(WM.var(wm, nw, :qp_nl_pipe))
     qn_pipe_nl = sum(WM.var(wm, nw, :qn_nl_pipe))
     dhp_pipe_nl = sum(WM.var(wm, nw, :dhp_nl_pipe))
