@@ -114,7 +114,7 @@ function get_owf_user_cut_callback(wm::WM.AbstractWaterModel, callback_stats)
 end
 
 
-function get_owf_user_cut_callback(wm::AbstractLRDXModel)
+function get_owf_user_cut_callback(wm::AbstractPWLRDXModel)
     head_loss, viscosity = wm.data["head_loss"], wm.data["viscosity"]
     base_length, base_time = 1.0, 1.0
     exponent = WM._get_exponent_from_head_loss_form(head_loss)

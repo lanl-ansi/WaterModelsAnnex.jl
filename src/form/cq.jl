@@ -234,12 +234,21 @@ function objective_strong_duality(wm::AbstractCQModel)
             @assert pump["pump_type"] in [WM.PUMP_QUADRATIC,
                 WM.PUMP_BEST_EFFICIENCY_POINT, WM.PUMP_LINEAR_POWER]
 
-            c = WM._calc_head_curve_coefficients(pump)
+            if pump["pump_type"] in [WM.PUMP_QUADRATIC, WM.PUMP_BEST_EFFICIENCY_POINT]
+                c = WM._calc_head_curve_coefficients(pump)
             
-            push!(f_2, JuMP.@NLexpression(wm.model,
-                z_pump[a] * c[1] / 3.0 * qp_pump[a]^3 +
-                z_pump[a] * 0.5 * c[2] * qp_pump[a]^2 +
-                z_pump[a] * c[3] * qp_pump[a]))
+                push!(f_2, JuMP.@NLexpression(wm.model,
+                    z_pump[a] * c[1] / 3.0 * qp_pump[a]^3 +
+                    z_pump[a] * 0.5 * c[2] * qp_pump[a]^2 +
+                    z_pump[a] * c[3] * qp_pump[a]))
+            elseif pump["pump_type"] == WM.PUMP_LINEAR_POWER
+                c = WM._calc_head_curve_coefficients(pump)
+                
+                push!(f_2, JuMP.@NLexpression(wm.model,
+                    z_pump[a] * c[1] * qp_pump[a] +
+                    z_pump[a] * (1.0 / (1.0 + c[3])) *
+                    c[2] * qp_pump[a]^(c[3] + 1.0)))
+            end 
         end
 
         for (i, tank) in WM.ref(wm, n, :tank)

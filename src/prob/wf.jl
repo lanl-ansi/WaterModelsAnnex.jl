@@ -236,7 +236,7 @@ function WM.build_mn_wf(wm::AbstractCDModel)
 end
 
 
-function WM.build_wf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
+function WM.build_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel, AbstractPWLRDXModel})
     # Create head loss functions, if necessary.
     WM._function_head_loss(wm)
 
@@ -248,7 +248,6 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
 
     # Additional variables for nonlinearities.
     variable_pipe_flow_nonlinear(wm)
-    variable_pipe_head_difference_nonlinear(wm)
     variable_pump_flow_nonlinear(wm)
     variable_pump_gain_nonlinear(wm)
     variable_tank_nonlinear(wm)
@@ -275,9 +274,7 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
         WM.constraint_pipe_head(wm, a)
         WM.constraint_pipe_head_loss(wm, a)
         WM.constraint_pipe_flow(wm, a)
-
         constraint_pipe_flow_nonlinear(wm, a)
-        constraint_pipe_head_nonlinear(wm, a)
     end
 
     # Selection of design pipes along unique arcs.
@@ -342,7 +339,7 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
 end
 
 
-function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
+function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel, AbstractPWLRDXModel})
     # Create head loss functions, if necessary.
     WM._function_head_loss(wm)
 
@@ -364,7 +361,6 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
 
         # Additional variables for nonlinearities.
         variable_pipe_flow_nonlinear(wm; nw=n)
-        variable_pipe_head_difference_nonlinear(wm; nw=n)
         variable_pump_flow_nonlinear(wm; nw=n)
         variable_pump_gain_nonlinear(wm; nw=n)
         variable_tank_nonlinear(wm; nw=n)
@@ -391,9 +387,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
             WM.constraint_pipe_flow(wm, a; nw=n)
             WM.constraint_pipe_head(wm, a; nw=n)
             WM.constraint_pipe_head_loss(wm, a; nw=n)
-
             constraint_pipe_flow_nonlinear(wm, a; nw=n)
-            constraint_pipe_head_nonlinear(wm, a; nw=n)
         end
 
         # Constraints on design pipe flows, heads, and physics.
@@ -477,7 +471,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
 end
 
 
-function WM.build_mn_owf(wm::Union{AbstractCDXModel, AbstractPWLRDXModel})
+function WM.build_mn_owf(wm::Union{AbstractCDXModel, AbstractLRDXModel, AbstractPWLRDXModel})
     # Build the water flow problem.
     WM.build_mn_wf(wm)
 

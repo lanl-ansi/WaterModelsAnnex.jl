@@ -42,6 +42,7 @@ include("core/variable.jl")
 include("form/cd.jl")
 include("form/cq.jl")
 include("form/cdx.jl")
+include("form/lrdx.jl")
 include("form/pwlrdx.jl")
 include("form/ncz.jl")
 
