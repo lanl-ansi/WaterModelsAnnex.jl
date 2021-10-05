@@ -61,13 +61,10 @@ end
 function constraint_on_off_pump_flow_nonlinear(
     wm::AbstractPWLRDXModel, n::Int, a::Int, node_fr::Int,
     node_to::Int, coeffs::Array{Float64, 1}, q_min_forward::Float64)
-    # Get object from the WaterModels reference dictionary.
-    pump = WM.ref(wm, n, :pump, a)
-
     # Get the variable for pump status.
     z = WM.var(wm, n, :z_pump, a)
 
-    # Get variables for positive flow and head difference.
+    # Get variables for positive flow and nonlinear flow.
     qp, qp_nl = WM.var(wm, n, :qp_pump, a), WM.var(wm, n, :qp_nl_pump, a)
     partition = WM.ref(wm, n, :pump, a, "flow_partition")
 
@@ -76,7 +73,7 @@ function constraint_on_off_pump_flow_nonlinear(
         # Add a linear outer approximation of the convex relaxation at `pt`.
         rhs = _calc_pump_flow_integrated_oa(qp, z, pt, coeffs)
 
-        # Add outer-approximation of the integrated head loss constraint.
+        # Add outer-approximation of the integrated head gain constraint.
         c = JuMP.@constraint(wm.model, qp_nl <= rhs)
 
         # Append the :pump_head_loss_integrated constraint array.

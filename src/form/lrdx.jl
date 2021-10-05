@@ -87,13 +87,9 @@ function constraint_pipe_flow_nonlinear(
     qp_min_forward, qp_max = max(0.0, q_min_forward), maximum(partition_p)
 
     if qp_min_forward != qp_max
-        # Compute scaled versions of the nonlinear constraint overapproximations.
-        f_1, f_2 = r * qp_min_forward^(1.0 + exponent), r * qp_max^(1.0 + exponent)
-        f_slope = (f_2 - f_1) / (qp_max - qp_min_forward)
-        f_lb_line = f_1 * y + f_slope * (qp - qp_min_forward * y)
-
         # Add upper-bounding lines of the head loss constraint.
-        c = JuMP.@constraint(wm.model, qp_nl / L <= f_lb_line)
+        f_ub_line_p = _calc_pipe_flow_integrated_bound(qp, y, qp_min_forward, qp_max, exponent)
+        c = JuMP.@constraint(wm.model, qp_nl / L <= r * f_ub_line_p)
 
         # Append the :on_off_des_pipe_head_loss constraint array.
         append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
@@ -121,13 +117,9 @@ function constraint_pipe_flow_nonlinear(
     qn_min_forward, qn_max = max(0.0, -q_max_reverse), maximum(partition_n)
 
     if qn_min_forward != qn_max
-        # Compute scaled versions of the head loss overapproximations.
-        f_1, f_2 = r * qn_min_forward^(1.0 + exponent), r * qn_max^(1.0 + exponent)
-        f_slope = (f_2 - f_1) / (qn_max - qn_min_forward)
-        f_lb_line = f_slope * (qn - qn_min_forward * (1.0 - y)) + f_1 * (1.0 - y)
-
         # Add upper-bounding lines of the head loss constraint.
-        c = JuMP.@constraint(wm.model, qn_nl / L <= f_lb_line)
+        f_ub_line_n = _calc_pipe_flow_integrated_bound(qn, 1.0 - y, qn_min_forward, qn_max, exponent)
+        c = JuMP.@constraint(wm.model, qn_nl / L <= r * f_ub_line_n)
 
         # Append the :on_off_des_pipe_head_loss constraint array.
         append!(WM.con(wm, n, :pipe_flow_nonlinear)[a], [c])
@@ -161,14 +153,9 @@ function constraint_on_off_pump_flow_nonlinear(
     qp_min_forward, qp_max = max(0.0, q_min_forward), maximum(partition)
 
     if qp_min_forward != qp_max
-        # Compute scaled versions of the head loss overapproximations.
-        f_1 = _calc_pump_flow_integrated(qp_min_forward, coeffs)
-        f_2 = _calc_pump_flow_integrated(qp_max, coeffs)        
-        f_slope = (f_2 - f_1) / (qp_max - qp_min_forward)
-        f_lb_line = f_1 * z + f_slope * (qp - qp_min_forward * z)
-
-        # Add upper-bounding lines of the head loss constraint.
-        c = JuMP.@constraint(wm.model, qp_nl <= f_lb_line)
+        # Add upper-bounding line for the nonlinear constraint.
+        lhs = _calc_pump_flow_integrated_bound(qp, z, qp_min_forward, qp_max, coeffs)
+        c = JuMP.@constraint(wm.model, lhs <= qp_nl)
 
         # Append the :on_off_des_pipe_head_loss constraint array.
         append!(WM.con(wm, n, :on_off_pump_flow_nonlinear)[a], [c])
