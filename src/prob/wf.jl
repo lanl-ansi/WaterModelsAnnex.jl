@@ -249,7 +249,6 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel, AbstractPWLR
     # Additional variables for nonlinearities.
     variable_pipe_flow_nonlinear(wm)
     variable_pump_flow_nonlinear(wm)
-    variable_pump_gain_nonlinear(wm)
     variable_tank_nonlinear(wm)
 
     # Indicator (status) variables.
@@ -297,9 +296,7 @@ function WM.build_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel, AbstractPWLR
         WM.constraint_on_off_pump_head_gain(wm, a)
         WM.constraint_on_off_pump_flow(wm, a)
         WM.constraint_on_off_pump_power(wm, a)
-
         constraint_on_off_pump_flow_nonlinear(wm, a)
-        constraint_on_off_pump_gain_nonlinear(wm, a)
     end
 
     for (k, pump_group) in WM.ref(wm, :pump_group)
@@ -362,7 +359,6 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel, AbstractP
         # Additional variables for nonlinearities.
         variable_pipe_flow_nonlinear(wm; nw=n)
         variable_pump_flow_nonlinear(wm; nw=n)
-        variable_pump_gain_nonlinear(wm; nw=n)
         variable_tank_nonlinear(wm; nw=n)
 
         # Indicator (status) variables.
@@ -410,9 +406,7 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel, AbstractP
             WM.constraint_on_off_pump_head_gain(wm, a; nw=n)
             WM.constraint_on_off_pump_flow(wm, a; nw=n)
             WM.constraint_on_off_pump_power(wm, a; nw=n)
-
             constraint_on_off_pump_flow_nonlinear(wm, a; nw=n)
-            constraint_on_off_pump_gain_nonlinear(wm, a; nw=n)
         end
 
         for (k, pump_group) in WM.ref(wm, :pump_group; nw=n)
