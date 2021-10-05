@@ -25,7 +25,7 @@ end
 function set_parameters_from_control_setting!(wm::AbstractCQModel, control_setting::ControlSetting)
     for (i, v) in enumerate(control_setting.variable_indices)
         symbol, id = v.variable_symbol, v.component_index
-        JuMP.set_value(WM.var(wm, symbol)[id], control_setting.vals[i])
+        JuMP.set_value(WM.var(wm, symbol)[id], round(control_setting.vals[i]))
     end
 end
 
@@ -108,11 +108,10 @@ end
 
 
 function get_pump_flow_expression(wm::AbstractCQModel, arc::Arc)::Float64
-    pump = WM.ref(wm, :pump, arc.index)
     q = max(0.0, JuMP.value(WM.var(wm, :q_pump, arc.index)))
     z = max(0.0, round(JuMP.value(WM.var(wm, :z_pump, arc.index))))
-    c = WM._calc_head_curve_coefficients(pump)
-    return -z * (c[1] * q^2 + c[2] * q + c[3])
+    head_curve_func = WM.ref(wm, :pump, arc.index, "head_curve_function")
+    return -z * head_curve_func(q)
 end
 
 
@@ -201,11 +200,16 @@ function flows_are_feasible(wm::AbstractCQModel)::Bool
         qp = max.(0.0, JuMP.value.(WM.var.(Ref(wm), Symbol("qp_" * string(symbol)), component_ids)))
         qn = max.(0.0, JuMP.value.(WM.var.(Ref(wm), Symbol("qn_" * string(symbol)), component_ids)))
 
-        if symbol in [:des_pipe, :pump, :regulator, :valve]
+        if symbol in [:des_pipe, :regulator, :valve]
             z = JuMP.value.(WM.var.(Ref(wm), Symbol("z_" * string(symbol)), component_ids))
             vals = round.(z) .* (qp .- qn)
             lbs = [WM.ref(wm, symbol, i, "flow_min") for i in component_ids]
             ubs = [WM.ref(wm, symbol, i, "flow_max") for i in component_ids]
+        elseif symbol == :pump
+            z = JuMP.value.(WM.var.(Ref(wm), Symbol("z_" * string(symbol)), component_ids))
+            vals = round.(z) .* qp
+            lbs = round.(z) .* [WM.ref(wm, symbol, i, "flow_min_forward") for i in component_ids]
+            ubs = round.(z) .* [WM.ref(wm, symbol, i, "flow_max") for i in component_ids]
         else
             vals = qp .- qn
             lbs = [WM.ref(wm, symbol, i, "flow_min") for i in component_ids]
@@ -229,10 +233,15 @@ function get_flow_infeasibilities(wm::AbstractCQModel, nw::Int)
         qp = max.(0.0, JuMP.value.(WM.var.(Ref(wm), Symbol("qp_" * string(symbol)), component_ids)))
         qn = max.(0.0, JuMP.value.(WM.var.(Ref(wm), Symbol("qn_" * string(symbol)), component_ids)))
 
-        if symbol in [:des_pipe, :pump, :regulator, :valve]
+        if symbol in [:des_pipe, :regulator, :valve]
             z = JuMP.value.(WM.var.(Ref(wm), Symbol("z_" * string(symbol)), component_ids))
             vals = round.(z) .* (qp .- qn)
             lbs = [WM.ref(wm, symbol, i, "flow_min") - 1.0e-6 for i in component_ids]
+            ubs = [WM.ref(wm, symbol, i, "flow_max") + 1.0e-6 for i in component_ids]
+        elseif symbol == :pump
+            z = JuMP.value.(WM.var.(Ref(wm), Symbol("z_" * string(symbol)), component_ids))
+            vals = round.(z) .* (qp .- qn)
+            lbs = [WM.ref(wm, symbol, i, "flow_min_forward") - 1.0e-6 for i in component_ids]
             ubs = [WM.ref(wm, symbol, i, "flow_max") + 1.0e-6 for i in component_ids]
         else
             vals = qp .- qn
@@ -384,7 +393,11 @@ end
 function simulate_control_setting(wm::AbstractCQModel, control_setting::ControlSetting)::SimulationResult
     wm_data = WM.get_wm_data(wm.data)
     WM._IM.load_timepoint!(wm_data, control_setting.network_id)
-    set_tank_heads!(wm); set_reservoir_heads!(wm); set_demands!(wm);
+
+    set_tank_heads!(wm)
+    set_reservoir_heads!(wm)
+    set_demands!(wm)
+    
     set_parameters_from_control_setting!(wm, control_setting)
     # set_warm_start_loose!(wm)
     JuMP.optimize!(wm.model)

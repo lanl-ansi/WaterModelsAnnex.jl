@@ -29,8 +29,8 @@ function WM.constraint_flow_conservation(
     
     if length(pump_fr) > 0 || length(pump_to) > 0
         z_pump = length(qp_pump) > 0 ? WM.var(wm, n, :z_pump) : 0.0
-        q_pump_fr = JuMP.@NLexpression(wm.model, sum(z_pump[a] * (qp_pump[a]) for a in pump_fr))
-        q_pump_to = JuMP.@NLexpression(wm.model, sum(z_pump[a] * (qp_pump[a]) for a in pump_to))
+        q_pump_fr = JuMP.@NLexpression(wm.model, sum(z_pump[a] * (qp_pump[a] - qn_pump[a]) for a in pump_fr))
+        q_pump_to = JuMP.@NLexpression(wm.model, sum(z_pump[a] * (qp_pump[a] - qn_pump[a]) for a in pump_to))
     else
         q_pump_fr = q_pump_to = 0.0
     end
@@ -51,7 +51,7 @@ function WM.constraint_flow_conservation(
         q_valve_fr = q_valve_to = 0.0
     end
    
-    if !isapprox(fixed_demand, 0.0; atol = 1.0e-9)
+    if !isapprox(fixed_demand, 0.0; atol = 1.0e-7)
         fixed_demand_val = wm.model[:fixed_demands][i]
     else
         fixed_demand_val = 0.0
