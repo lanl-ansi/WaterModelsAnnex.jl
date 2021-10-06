@@ -125,7 +125,7 @@ function WM.build_wf(wm::AbstractCDModel)
     constraint_strong_duality(wm)
 
     # Add the objective.
-    # WM.objective_wf(wm)
+    WM.objective_wf(wm)
 end
 
 
@@ -429,6 +429,11 @@ function WM.build_mn_wf(wm::Union{AbstractCDXModel, AbstractLRDXModel, AbstractP
         for (a, valve) in WM.ref(wm, :valve; nw=n)
             WM.constraint_on_off_valve_head(wm, a; nw=n)
             WM.constraint_on_off_valve_flow(wm, a; nw=n)
+        end
+
+        # Constraints on tank nonlinearities.
+        for i in WM.ids(wm, :tank; nw=n)
+            constraint_tank_nonlinear(wm, i; nw=n)
         end
 
         # Add the strong duality constraint.
