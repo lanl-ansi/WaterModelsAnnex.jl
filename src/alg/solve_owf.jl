@@ -1,5 +1,4 @@
 function compute_pairwise_cuts(network::Dict{String, Any}, cuts_path::String, optimizer)
-
     # Load the existing cuts.
     cuts = load_pairwise_cuts(cuts_path)
 
@@ -34,9 +33,13 @@ function compute_pairwise_cuts(network::Dict{String, Any}, cuts_path::String, op
     # Write something to the logger to say the process has started.
     WM.Memento.info(LOGGER, "Beginning cut preprocessing routine.")
 
-    cut_time = @elapsed Threads.@threads for i in 1:length(problem_sets)
+    # Build vector for tracking parallel times elapsed.
+    parallel_times_elapsed = zeros(length(problem_sets))
+
+    time_elapsed = @elapsed Threads.@threads for i in 1:length(problem_sets)
         # Compute pairwise cuts across all problem sets.
-        cuts_local = WM._compute_pairwise_cuts!(wms[Threads.threadid()], [problem_sets[i]])
+        parallel_times_elapsed[i] = @elapsed cuts_local = WM._compute_pairwise_cuts!(
+            wms[Threads.threadid()], [problem_sets[i]])
         append!(cuts_array[Threads.threadid()], cuts_local)
     end
 
@@ -44,7 +47,11 @@ function compute_pairwise_cuts(network::Dict{String, Any}, cuts_path::String, op
     cuts = vcat(cuts, vcat(cuts_array...))
 
     # Write something to the logger to say the process has ended.
-    WM.Memento.info(LOGGER, "Pairwise cut preprocessing completed in $(cut_time) seconds.")
+    time_elapsed_rounded = round(time_elapsed; digits = 2)
+    parallel_time_elapsed = maximum(parallel_times_elapsed)
+    parallel_time_elapsed_rounded = round(parallel_time_elapsed; digits = 2)
+    WM.Memento.info(LOGGER, "Pairwise cut preprocessing completed in $(time_elapsed_rounded) " *
+        "seconds (ideal parallel time: $(parallel_time_elapsed_rounded) seconds).")
 
     # Return the data structure comprising cuts.
     return cuts
