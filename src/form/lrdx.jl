@@ -30,7 +30,7 @@ function _calc_pump_flow_integrated_bound(q::JuMP.VariableRef, z::Union{JuMP.Var
 end
 
 
-function variable_pipe_flow_nonlinear(wm::Union{AbstractPWLRDXModel,AbstractLRDXModel}; nw::Int = WM.nw_id_default, bounded::Bool = true, report::Bool = true)
+function variable_pipe_flow_nonlinear(wm::Union{AbstractPWLRDXModel,AbstractLRDXModel,AbstractCDXModel}; nw::Int = WM.nw_id_default, bounded::Bool = true, report::Bool = true)
     # Initialize variables associated with positive flows.
     qp_nl = WM.var(wm, nw)[:qp_nl_pipe] = JuMP.@variable(
         wm.model, [a in WM.ids(wm, nw, :pipe)], lower_bound = 0.0, base_name="$(nw)_qp_nl",
@@ -49,7 +49,7 @@ function variable_pipe_flow_nonlinear(wm::Union{AbstractPWLRDXModel,AbstractLRDX
 end
 
 
-function variable_pump_flow_nonlinear(wm::Union{AbstractPWLRDXModel,AbstractLRDXModel}; nw::Int = WM.nw_id_default, bounded::Bool = true, report::Bool = true)
+function variable_pump_flow_nonlinear(wm::Union{AbstractPWLRDXModel,AbstractLRDXModel,AbstractCDXModel}; nw::Int = WM.nw_id_default, bounded::Bool = true, report::Bool = true)
     # Initialize variables associated with positive flows.
     qp_nl = WM.var(wm, nw)[:qp_nl_pump] = JuMP.@variable(
         wm.model, [a in WM.ids(wm, nw, :pump)], lower_bound = 0.0, base_name = "$(nw)_qp_nl",
@@ -60,7 +60,7 @@ function variable_pump_flow_nonlinear(wm::Union{AbstractPWLRDXModel,AbstractLRDX
 end
 
 
-function variable_tank_nonlinear(wm::Union{AbstractPWLRDXModel,AbstractLRDXModel}; nw::Int=WM.nw_id_default, bounded::Bool = true, report::Bool = true)
+function variable_tank_nonlinear(wm::Union{AbstractPWLRDXModel,AbstractLRDXModel,AbstractCDXModel}; nw::Int=WM.nw_id_default, bounded::Bool = true, report::Bool = true)
     # Initialize variables associated with tank flow-head nonlinearities.
     qh_nl = WM.var(wm, nw)[:qh_nl_tank] = JuMP.@variable(
         wm.model, [i in WM.ids(wm, nw, :tank)], base_name = "$(nw)_qh_nl",
@@ -198,20 +198,21 @@ end
 
 
 ""
-function constraint_strong_duality(wm::Union{AbstractPWLRDXModel,AbstractLRDXModel}; nw::Int=WM.nw_id_default)
+function constraint_strong_duality(wm::Union{AbstractPWLRDXModel,AbstractLRDXModel,AbstractCDXModel}, nw::Int)
     qp_pipe_nl = sum(WM.var(wm, nw, :qp_nl_pipe))
     qn_pipe_nl = sum(WM.var(wm, nw, :qn_nl_pipe))
     qp_pump_nl = sum(WM.var(wm, nw, :qp_nl_pump))
     qh_nl_tank = sum(WM.var(wm, nw, :qh_nl_tank))
 
     reservoir_sum = JuMP.AffExpr(0.0)
-    demand_sum = JuMP.AffExpr(0.0)
 
     for res in values(WM.ref(wm, nw, :reservoir))
         head = WM.ref(wm, nw, :node, res["node"], "head_nominal")
         q_reservoir = WM.var(wm, nw, :q_reservoir, res["index"])
         reservoir_sum += q_reservoir * head
     end
+
+    demand_sum = JuMP.AffExpr(0.0)
 
     for demand in values(WM.ref(wm, nw, :demand))
         h = WM.var(wm, nw, :h, demand["node"])
@@ -220,5 +221,6 @@ function constraint_strong_duality(wm::Union{AbstractPWLRDXModel,AbstractLRDXMod
 
     linear_terms = demand_sum - reservoir_sum
     nonlinear_terms = qp_pipe_nl + qn_pipe_nl - qp_pump_nl - qh_nl_tank
-    JuMP.@constraint(wm.model, linear_terms + nonlinear_terms <= 0.0)
+    c = JuMP.@constraint(wm.model, linear_terms + nonlinear_terms <= 0.0)
+    append!(WM.con(wm, nw, :strong_duality, 1), [c])
 end
