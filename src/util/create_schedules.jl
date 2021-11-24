@@ -126,7 +126,7 @@ function get_arc_flow_expression(wm::AbstractCQModel, arc::Arc)::Float64
 end
 
 
-function build_right_hand_side(wm::AbstractCQModel)::Array{Float64, 1}
+function build_right_hand_side(wm::AbstractCQModel)::Vector{Float64}
     node_ids, arcs = sort(collect(WM.ids(wm, :node))), collect_arcs(wm)
     reservoir_ids = sort(collect(WM.ids(wm, :reservoir)))
     tank_ids = sort(collect(WM.ids(wm, :tank)))
@@ -189,7 +189,7 @@ function build_incidence_matrix(wm::AbstractCQModel)::Array{Float64, 2}
 end
 
 
-function compute_heads(incidence::Array{Float64, 2}, rhs::Array{Float64, 1})
+function compute_heads(incidence::Array{Float64, 2}, rhs::Vector{Float64})
     return LinearAlgebra.pinv(incidence) * rhs
 end
 
@@ -297,7 +297,7 @@ function get_head_infeasibilities(wm::AbstractCQModel, nw::Int)
 end
 
 
-function heads_are_feasible(wm::AbstractCQModel, heads::Array{Float64, 1})
+function heads_are_feasible(wm::AbstractCQModel, heads::Vector{Float64})
     for (row_index, node_id) in enumerate(sort(collect(WM.ids(wm, :node))))
         head_min = WM.ref(wm, :node, node_id, "head_min")
         head_max = WM.ref(wm, :node, node_id, "head_max")

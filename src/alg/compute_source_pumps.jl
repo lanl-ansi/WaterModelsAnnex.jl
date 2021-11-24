@@ -266,7 +266,7 @@ end
 This function checks to see if a pump when on only pulls water from reservoirs. 
 """
 function check_if_source_pump(
-    pump::Array{Int64, 1}, node_map::Dict{String, Int64}, network::Dict{String, <:Any},
+    pump::Vector{Int64}, node_map::Dict{String, Int64}, network::Dict{String, <:Any},
     pumps_dict::Dict{<:Any, <:Any}, directional_components_dict::Dict{<:Any, <:Any},
     graph::LightGraphs.SimpleGraphs.AbstractSimpleGraph{Int64})
     pump_from_node = node_map[string(first(pump))]

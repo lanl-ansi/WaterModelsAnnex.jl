@@ -74,7 +74,7 @@ end
 
 function constraint_on_off_pump_flow_nonlinear(
     wm::AbstractPWLRDXModel, n::Int, a::Int, node_fr::Int,
-    node_to::Int, coeffs::Array{Float64, 1}, q_min_forward::Float64)
+    node_to::Int, coeffs::Vector{Float64}, q_min_forward::Float64)
     # Get the variable for pump status.
     z = WM.var(wm, n, :z_pump, a)
 

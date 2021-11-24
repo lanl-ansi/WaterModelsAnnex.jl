@@ -1,11 +1,11 @@
 
 function constraint_flow_conservation_excess(
-    wm::WM.AbstractWaterModel, n::Int, i::Int, pipe_fr::Array{Int64,1},
-    pipe_to::Array{Int64,1}, des_pipe_fr::Array{Int64,1}, des_pipe_to::Array{Int64,1},
-    pump_fr::Array{Int64,1}, pump_to::Array{Int64,1}, regulator_fr::Array{Int64,1},
-    regulator_to::Array{Int64,1}, short_pipe_fr::Array{Int64,1},
-    short_pipe_to::Array{Int64,1}, valve_fr::Array{Int64,1}, valve_to::Array{Int64,1},
-    reservoirs::Array{Int64,1}, tanks::Array{Int64,1}, dispatchable_demands::Array{Int64,1},
+    wm::WM.AbstractWaterModel, n::Int, i::Int, pipe_fr::Vector{Int64},
+    pipe_to::Vector{Int64}, des_pipe_fr::Vector{Int64}, des_pipe_to::Vector{Int64},
+    pump_fr::Vector{Int64}, pump_to::Vector{Int64}, regulator_fr::Vector{Int64},
+    regulator_to::Vector{Int64}, short_pipe_fr::Vector{Int64},
+    short_pipe_to::Vector{Int64}, valve_fr::Vector{Int64}, valve_to::Vector{Int64},
+    reservoirs::Vector{Int64}, tanks::Vector{Int64}, dispatchable_demands::Vector{Int64},
     fixed_demand::Float64)
     # Collect flow variable references per component.
     q_pipe, q_des_pipe = WM.var(wm, n, :q_pipe), WM.var(wm, n, :q_des_pipe)

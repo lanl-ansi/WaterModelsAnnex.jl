@@ -14,7 +14,7 @@ function submit_heuristic_solution_from_setting!(wm, cb_data, network, setting, 
     wm_sim = _instantiate_cq_model(network, nlp_optimizer)
     network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
     vars = Array{JuMP.VariableRef, 1}([])
-    vals = Array{Float64, 1}([])
+    vals = Vector{Float64}([])
     total_cost = 0.0
 
     for nw in network_ids

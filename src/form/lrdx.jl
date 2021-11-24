@@ -11,19 +11,19 @@ function _calc_pipe_flow_integrated_oa(q::JuMP.VariableRef, z::Union{JuMP.Variab
 end
 
 
-function _calc_pump_flow_integrated(q_hat::Float64, coeffs::Array{Float64, 1})
+function _calc_pump_flow_integrated(q_hat::Float64, coeffs::Vector{Float64})
     return coeffs[1] * q_hat + coeffs[2] * q_hat^(1.0 + coeffs[3])
 end
 
 
-function _calc_pump_flow_integrated_oa(q::JuMP.VariableRef, z::Union{JuMP.VariableRef, JuMP.GenericAffExpr}, q_hat::Float64, coeffs::Array{Float64, 1})
+function _calc_pump_flow_integrated_oa(q::JuMP.VariableRef, z::Union{JuMP.VariableRef, JuMP.GenericAffExpr}, q_hat::Float64, coeffs::Vector{Float64})
     f = coeffs[1] * q_hat + coeffs[2] * q_hat^(1.0 + coeffs[3])
     df = coeffs[1] + (1.0 + coeffs[3]) * coeffs[2] * q_hat^(coeffs[3])
     return f * z + df * (q - q_hat * z)
 end
 
 
-function _calc_pump_flow_integrated_bound(q::JuMP.VariableRef, z::Union{JuMP.VariableRef, JuMP.GenericAffExpr}, q_lb::Float64, q_ub::Float64, coeffs::Array{Float64, 1})
+function _calc_pump_flow_integrated_bound(q::JuMP.VariableRef, z::Union{JuMP.VariableRef, JuMP.GenericAffExpr}, q_lb::Float64, q_ub::Float64, coeffs::Vector{Float64})
     f_lb = coeffs[1] * q_lb + coeffs[2] * q_lb^(1.0 + coeffs[3])
     f_ub = coeffs[1] * q_ub + coeffs[2] * q_ub^(1.0 + coeffs[3])
     return f_lb * z + (f_ub - f_lb) / (q_ub - q_lb) * (q - q_lb * z)
@@ -165,7 +165,7 @@ end
 
 function constraint_on_off_pump_flow_nonlinear(
     wm::AbstractLRDXModel, n::Int, a::Int, node_fr::Int,
-    node_to::Int, coeffs::Array{Float64, 1}, q_min_forward::Float64)
+    node_to::Int, coeffs::Vector{Float64}, q_min_forward::Float64)
     # Get the variable for pump status.
     z = WM.var(wm, n, :z_pump, a)
 

@@ -21,9 +21,9 @@ function _update_control_time_series!(wm::WM.AbstractWaterModel, cb_data, networ
         end
 
         statuses = [Int(result[n][k]) for n in sort(collect(keys(schedule)))]
-        data["time_series"][comp_type][comp_id]["status"] = Array{Int64, 1}(statuses)
-        data["time_series"][comp_type][comp_id]["z_min"] = Array{Int64, 1}(statuses)
-        data["time_series"][comp_type][comp_id]["z_max"] = Array{Int64, 1}(statuses)
+        data["time_series"][comp_type][comp_id]["status"] = Vector{Int64}(statuses)
+        data["time_series"][comp_type][comp_id]["z_min"] = Vector{Int64}(statuses)
+        data["time_series"][comp_type][comp_id]["z_max"] = Vector{Int64}(statuses)
     end
 end
 

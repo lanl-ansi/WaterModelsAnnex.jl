@@ -178,9 +178,9 @@ function _update_control_time_series!(data::Dict{String, <:Any}, schedule, resul
         end
 
         statuses = [Int(result[n][k]) for n in sort(collect(keys(schedule)))]
-        data["time_series"][comp_type][comp_id]["status"] = Array{Int64, 1}(statuses)
-        data["time_series"][comp_type][comp_id]["z_min"] = Array{Int64, 1}(statuses)
-        data["time_series"][comp_type][comp_id]["z_max"] = Array{Int64, 1}(statuses)
+        data["time_series"][comp_type][comp_id]["status"] = Vector{Int64}(statuses)
+        data["time_series"][comp_type][comp_id]["z_min"] = Vector{Int64}(statuses)
+        data["time_series"][comp_type][comp_id]["z_max"] = Vector{Int64}(statuses)
     end
 end
 
@@ -203,10 +203,10 @@ function _update_control_time_series!(data::Dict{String, <:Any}, result::Dict{St
             data["time_series"]["pump"][i] = Dict{String, Any}()
         end
 
-        statuses = Array{Int64, 1}([Int(sol[string(n)]["pump"][i]["status"]) for n in nw_ids])
-        data["time_series"]["pump"][i]["status"] = Array{Int64, 1}(statuses)
-        data["time_series"]["pump"][i]["z_min"] = Array{Int64, 1}(statuses)
-        data["time_series"]["pump"][i]["z_max"] = Array{Int64, 1}(statuses)
+        statuses = Vector{Int64}([Int(sol[string(n)]["pump"][i]["status"]) for n in nw_ids])
+        data["time_series"]["pump"][i]["status"] = Vector{Int64}(statuses)
+        data["time_series"]["pump"][i]["z_min"] = Vector{Int64}(statuses)
+        data["time_series"]["pump"][i]["z_max"] = Vector{Int64}(statuses)
     end
 
     for (i, valve) in data["valve"]
@@ -216,7 +216,7 @@ function _update_control_time_series!(data::Dict{String, <:Any}, result::Dict{St
             data["time_series"]["valve"][i] = Dict{String, Any}()
         end
 
-        statuses = Array{Int64, 1}([Int(sol[string(n)]["valve"][i]["status"]) for n in nw_ids])
+        statuses = Vector{Int64}([Int(sol[string(n)]["valve"][i]["status"]) for n in nw_ids])
         data["time_series"]["valve"][i]["status"] = statuses
         data["time_series"]["valve"][i]["z_min"] = statuses
         data["time_series"]["valve"][i]["z_max"] = statuses

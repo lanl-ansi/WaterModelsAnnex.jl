@@ -3,7 +3,7 @@ function _populate_oa_dict(wm::WM.AbstractWaterModel, comp_type::Symbol)
 
     for nw in WM.nw_ids(wm)
         for (i, comp) in WM.ref(wm, nw, comp_type)
-            vals[nw][i] = Array{Float64, 1}([])
+            vals[nw][i] = Vector{Float64}([])
         end
     end
 

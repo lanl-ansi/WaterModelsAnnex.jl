@@ -1,10 +1,13 @@
+Manifest.toml
 .DS_Store
 *.jl.cov
 *.jl.*.cov
 *.jl.mem
+*.html
 deps/deps.jl
 docs/build/
 docs/site/
 docs/.documenter
 .project
 .tags
+scripts/
