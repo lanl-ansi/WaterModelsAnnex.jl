@@ -37,16 +37,17 @@ function add_pump_volume_cuts!(wm::WM.AbstractWaterModel)
     # Get all network IDs in the multinetwork.
     network_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
 
-    # Start with the first network, representing the initial time step.
-    n_1, n_f = network_ids[1], network_ids[end]
+    # Start with the first network.
+    n_1 = network_ids[1]
 
     for n in network_ids
-        time_step = WM.ref(wm, n, :time_step)
         nws_remaining = _collect_remaining_nws(wm, n)
         demand_volume = _sum_remaining_demands(wm, nws_remaining)
         reservoir_volume = _sum_remaining_reservoir_flows(wm, nws_remaining)
 
+        time_step = WM.ref(wm, n, :time_step)
         tank_volume = (sum(WM.var(wm, n_1, :V)) - sum(WM.var(wm, n, :V))) / time_step
+
         WM.JuMP.@constraint(wm.model, demand_volume + tank_volume <= reservoir_volume)
     end
 end

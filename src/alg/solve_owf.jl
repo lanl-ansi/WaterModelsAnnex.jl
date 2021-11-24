@@ -1,3 +1,84 @@
+function compute_pairwise_cuts_nws(data::Dict{String, <:Any}, error_tolerance::Float64, optimizer)
+    cuts = Vector{WM._PairwiseCut}([])
+    num_time_steps = data["time_series"]["num_steps"]
+
+    # Write something to the logger to say the process has started.
+    WM.Memento.info(LOGGER, "Beginning multistep preprocessing routine.")
+    time_elapsed = 0.0
+
+    for nw in 1:num_time_steps-1
+        data_nw = deepcopy(data)
+        WM._IM.load_timepoint!(data_nw, nw)
+        WM.set_flow_partitions_si!(data_nw, error_tolerance, 1.0e-4)
+
+        if nw != 1
+            map(x -> x["dispatchable"] = true, values(data_nw["tank"]))
+            time_elapsed += @elapsed cuts_tmp = compute_pairwise_cuts_nw(data_nw, optimizer)
+            map(x -> x["dispatchable"] = false, values(data_nw["tank"]))
+        else
+            time_elapsed += @elapsed cuts_tmp = compute_pairwise_cuts_nw(data_nw, optimizer)
+        end
+
+        map(x -> x.variable_index_1.network_index = nw, cuts_tmp)
+        map(x -> x.variable_index_2.network_index = nw, cuts_tmp)
+        cuts = vcat(cuts, cuts_tmp)
+    end
+
+    time_elapsed_rounded = round(time_elapsed; digits = 2)
+    WM.Memento.info(LOGGER, "Multistep cut preprocessing routine completed in $(time_elapsed_rounded) seconds.")
+
+    return cuts
+end
+
+
+function compute_pairwise_cuts_nw(network::Dict{String, <:Any}, optimizer)
+    # Construct independent thread-local WaterModels objects.
+    wms = Vector{WM.AbstractWaterModel}(undef, Threads.nthreads())
+
+    # Update WaterModels objects in parallel.
+    Threads.@threads for i in 1:Threads.nthreads()
+        # Instantiate models.
+        wms[i] = WM.instantiate_model(deepcopy(network), WM.PWLRDWaterModel, WM.build_owf)
+
+        # Set the optimizer for the bound tightening model.
+        JuMP.set_optimizer(wms[i].model, optimizer)
+    end
+
+    # Get problem sets for generating pairwise cuts.
+    problem_sets = WM._get_pairwise_problem_sets(wms[1])
+ 
+    # Generate data structures to store thread-local cut results.
+    cuts_array = Array{Array{WM._PairwiseCut, 1}, 1}([])
+
+    for i in 1:Threads.nthreads()
+        # Initialize the per-thread pairwise cut array.
+        push!(cuts_array, Array{WM._PairwiseCut, 1}([]))
+    end
+
+    # Write something to the logger to say the process has started.
+    WM.Memento.info(LOGGER, "Beginning cut preprocessing routine.")
+
+    # Build vector for tracking parallel times elapsed.
+    parallel_times_elapsed = zeros(length(problem_sets))
+
+    time_elapsed = @elapsed Threads.@threads for i in 1:length(problem_sets)
+        # Compute pairwise cuts across all problem sets.
+        parallel_times_elapsed[i] = @elapsed cuts_local = WM._compute_pairwise_cuts!(wms[Threads.threadid()], [problem_sets[i]])
+        append!(cuts_array[Threads.threadid()], cuts_local)
+    end
+
+    # Write something to the logger to say the process has ended.
+    time_elapsed_rounded = round(time_elapsed; digits = 2)
+    parallel_time_elapsed = maximum(parallel_times_elapsed)
+    parallel_time_elapsed_rounded = round(parallel_time_elapsed; digits = 2)
+    WM.Memento.info(LOGGER, "Pairwise cut preprocessing completed in $(time_elapsed_rounded) " *
+        "seconds (ideal parallel time: $(parallel_time_elapsed_rounded) seconds).")
+
+    # Return the data structure comprising cuts.
+    return vcat(cuts_array...)
+end
+
+
 function compute_pairwise_cuts(network::Dict{String, Any}, cuts_path::String, optimizer)
     # Load the existing cuts.
     cuts = load_pairwise_cuts(cuts_path)

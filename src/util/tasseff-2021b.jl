@@ -5,8 +5,8 @@ function run_obbt(inp_path::String, modification_path::String, cuts_path::String
     WM._IM.update_data!(network, modifications);
     WM.correct_network_data!(network);
 
-    WM.set_flow_partitions_si!(network, 0.1, 1.0e-4);
-    flow_partition_func = x -> WM.set_flow_partitions_si!(x, 0.1, 1.0e-4);
+    WM.set_flow_partitions_si!(network, 100.0, 1.0e-4);
+    flow_partition_func = x -> WM.set_flow_partitions_si!(x, 100.0, 1.0e-4);
 
     solve_obbt_owf_switching!(network, optimizer; use_relaxed_network = true,
         model_type = WM.PWLRDWaterModel, time_limit = time_limit,
@@ -43,7 +43,7 @@ function run_obbt_mn!(network_mn::Dict{String, <:Any}, cuts_path::String, time_l
 end
 
 
-function solve_owf_upper_bounds(network_mn::Dict, network::Dict, cuts_path::String, build_method::Function, formulation::Type, mip_optimizer, nlp_optimizer)
+function solve_owf_upper_bounds(network_mn::Dict, network::Dict, cuts_path::String, build_method::Function, formulation::Type, mip_optimizer, nlp_optimizer, relax_direction::Bool)
     # Solve a continuously-relaxed version of the problem.
     wm_micp = WM.instantiate_model(network_mn, formulation, build_method)
     WM.JuMP.set_optimizer(wm_micp.model, nlp_optimizer)
@@ -51,7 +51,13 @@ function solve_owf_upper_bounds(network_mn::Dict, network::Dict, cuts_path::Stri
 
     # Instantiate the model and add cutting planes.
     wm = WM.instantiate_model(network_mn, formulation, build_method)
-    add_pairwise_cuts(wm, load_pairwise_cuts(cuts_path))
+    cuts = load_pairwise_cuts(cuts_path);
+    WM._add_pairwise_cuts!(wm, cuts);
+    add_pump_volume_cuts!(wm);
+
+    if relax_direction
+        WM._relax_all_direction_variables!(wm)
+    end
  
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, mip_optimizer)
