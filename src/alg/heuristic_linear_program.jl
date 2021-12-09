@@ -32,7 +32,7 @@ end
 
 function add_heuristic_linear_program_objective!(model::JuMP.Model, z, simulation_results::Array{SimulationResult, 1})
     cost = sum(z[i] * simulation_results[i].cost for i in 1:length(simulation_results))
-    return JuMP.@objective(model, WM._MOI.MIN_SENSE, cost)
+    return JuMP.@objective(model, WM.JuMP.MOI.MIN_SENSE, cost)
 end
 
 

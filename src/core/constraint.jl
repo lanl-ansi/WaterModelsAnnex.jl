@@ -23,7 +23,19 @@ function constraint_flow_conservation_excess(
         sum(q_regulator[a] for a in regulator_to) -
         sum(q_short_pipe[a] for a in short_pipe_fr) +
         sum(q_short_pipe[a] for a in short_pipe_to) -
-        sum(q_valve[a] for a in valve_fr) + sum(q_valve[a] for a in valve_to) == -
+        sum(q_valve[a] for a in valve_fr) + sum(q_valve[a] for a in valve_to) <= -
+        sum(q_reservoir[k] for k in reservoirs) - sum(q_tank[k] for k in tanks) +
+        sum(q_demand[k] for k in dispatchable_demands) + fixed_demand + q_excess)
+
+    WM.con(wm, n, :flow_conservation)[i] = JuMP.@constraint(wm.model, -
+        sum(q_pipe[a] for a in pipe_fr) + sum(q_pipe[a] for a in pipe_to) -
+        sum(q_des_pipe[a] for a in des_pipe_fr) + sum(q_des_pipe[a] for a in des_pipe_to) -
+        sum(q_pump[a] for a in pump_fr) + sum(q_pump[a] for a in pump_to) -
+        sum(q_regulator[a] for a in regulator_fr) +
+        sum(q_regulator[a] for a in regulator_to) -
+        sum(q_short_pipe[a] for a in short_pipe_fr) +
+        sum(q_short_pipe[a] for a in short_pipe_to) -
+        sum(q_valve[a] for a in valve_fr) + sum(q_valve[a] for a in valve_to) >= -
         sum(q_reservoir[k] for k in reservoirs) - sum(q_tank[k] for k in tanks) +
         sum(q_demand[k] for k in dispatchable_demands) + fixed_demand + q_excess)
 end

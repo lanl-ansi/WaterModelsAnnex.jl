@@ -55,8 +55,12 @@ end
 
 
 function constraint_pipe_flow_nonlinear(wm::WM.AbstractWaterModel, a::Int; nw::Int=WM.nw_id_default, kwargs...)
-    node_fr, node_to = WM.ref(wm, nw, :pipe, a)["node_fr"], WM.ref(wm, nw, :pipe, a)["node_to"]
-    exponent, L = WM.ref(wm, nw, :alpha), WM.ref(wm, nw, :pipe, a)["length"]
+    node_fr = ref(wm, nw, :pipe, a, "node_fr")
+    node_to = ref(wm, nw, :pipe, a, "node_to")
+    exponent = WM._get_exponent_from_head_loss_form(
+        wm.ref[:it][wm_it_sym][:head_loss])
+    L = ref(wm, nw, :pipe, a, "length")
+
     base_length = get(wm.data, "base_length", 1.0)
     base_mass = get(wm.data, "base_mass", 1.0)
     base_time = get(wm.data, "base_time", 1.0)

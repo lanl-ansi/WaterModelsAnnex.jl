@@ -1,21 +1,17 @@
 module WaterModelsAnnex
 
-import BlockDecomposition
-import Coluna
 import Combinatorics
 import Gurobi
-import JuMP
 import LinearAlgebra
 import PolyhedralRelaxations
 import WaterModels
 import LightGraphs
 import MetaGraphs
 
-const BD = BlockDecomposition
 const WM = WaterModels
 const JuMP = WM.JuMP
-const MOI = WM.MathOptInterface
-const MOIU = WM.MathOptInterface.Utilities
+const MOI = WM.JuMP.MOI
+const MOIU = WM.JuMP.MOI.Utilities
 const LOGGER = WM.Memento.getlogger(WM)
 
 # Register the module level logger at runtime so that it can be accessed via

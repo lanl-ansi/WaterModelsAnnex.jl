@@ -5,13 +5,11 @@ import WaterModels
 
 import Cbc
 import Ipopt
-import JuMP
 import JSON
 
-import MathOptInterface
-const MOI = MathOptInterface
-const MOIU = MathOptInterface.Utilities
 const WM = WaterModels
+const MOI = WM.JuMP.MathOptInterface
+const MOIU = WM.JuMP.MathOptInterface.Utilities
 
 using Test
 

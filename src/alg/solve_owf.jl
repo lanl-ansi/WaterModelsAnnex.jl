@@ -164,7 +164,7 @@ function construct_owf_model(network_mn::Dict{String, Any}, owf_optimizer; use_p
 
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, owf_optimizer)
-    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+    WM.JuMP.MOI.set(wm.model, WM.JuMP.MOI.NumberOfThreads(), 1)
 
     # Return the WaterModels object.
     return wm
@@ -193,13 +193,13 @@ end
 function set_lazy_attributes!(wm::WM.AbstractWaterModel)
     for nw in sort(collect(WM.nw_ids(wm)))[1:end-1]
         for constraints in values(WM.con(wm, nw, :pipe_head_loss))
-            WM._MOI.set.(Ref(JuMP.backend(wm.model).optimizer),
+            WM.JuMP.MOI.set.(Ref(JuMP.backend(wm.model).optimizer),
                     Ref(Gurobi.ConstraintAttribute("Lazy")),
                     JuMP.index.(constraints), 2)
         end
 
         for constraints in values(WM.con(wm, nw, :on_off_pump_head_gain))
-            WM._MOI.set.(Ref(JuMP.backend(wm.model).optimizer),
+            WM.JuMP.MOI.set.(Ref(JuMP.backend(wm.model).optimizer),
                     Ref(Gurobi.ConstraintAttribute("Lazy")),
                     JuMP.index.(constraints), 2)
         end
@@ -216,7 +216,7 @@ function set_branching_priorities!(wm::WM.AbstractWaterModel)
                 var_symbol = Symbol("y_" * string(comp_type))
                 var = WM.var(wm, nw, var_symbol, i)
                 
-                WM._MOI.set(JuMP.backend(wm.model).optimizer,
+                WM.JuMP.MOI.set(JuMP.backend(wm.model).optimizer,
                     Gurobi.VariableAttribute("BranchPriority"),
                     JuMP.index(var), priority)
             end
@@ -231,7 +231,7 @@ function set_branching_priorities!(wm::WM.AbstractWaterModel)
                 var_symbol = Symbol("z_" * string(comp_type))
                 var = WM.var(wm, nw, var_symbol, i)
 
-                WM._MOI.set(JuMP.backend(wm.model).optimizer,
+                WM.JuMP.MOI.set(JuMP.backend(wm.model).optimizer,
                     Gurobi.VariableAttribute("BranchPriority"),
                     JuMP.index(var), priority)
             end
@@ -315,7 +315,7 @@ function solve_owf_upper_bounds(network_mn::Dict, pc_path::String, mip_optimizer
     # Set the optimizer and other important solver parameters.
     wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, WM.build_mn_owf)
     WM.JuMP.set_optimizer(wm.model, mip_optimizer)
-    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+    WM.JuMP.MOI.set(wm.model, WM.JuMP.MOI.NumberOfThreads(), 1)
 
     # Add extra cuts to the formulation.
     pairwise_cuts = load_pairwise_cuts(pc_path)
@@ -349,7 +349,7 @@ function solve_owf_upper_bounds_lrdx(network_mn::Dict, pc_path::String, mip_opti
     # Set the optimizer and other important solver parameters.
     wm = WM.instantiate_model(network_mn, PWLRDXWaterModel, WM.build_mn_owf)
     WM.JuMP.set_optimizer(wm.model, mip_optimizer)
-    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+    WM.JuMP.MOI.set(wm.model, WM.JuMP.MOI.NumberOfThreads(), 1)
 
     # Add extra cuts to the formulation.
     pairwise_cuts = load_pairwise_cuts(pc_path)
@@ -383,7 +383,7 @@ function solve_owf_upper_bounds(network_mn::Dict, network::Dict, build_method::F
     # Set the optimizer and other important solver parameters.
     wm = WM.instantiate_model(network_mn, WM.PWLRDWaterModel, build_method)
     WM.JuMP.set_optimizer(wm.model, mip_optimizer)
-    WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+    WM.JuMP.MOI.set(wm.model, WM.JuMP.MOI.NumberOfThreads(), 1)
 
     # TODO: Remove this once Gurobi.jl interface is fixed.
     wm.model.moi_backend.optimizer.model.has_generic_callback = false

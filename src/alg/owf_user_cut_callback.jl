@@ -49,7 +49,7 @@ function get_owf_user_cut_callback(wm::WM.AbstractWaterModel, callback_stats)
                             push!(qp_pipe_vals[nw][a], max(0.0, qp_sol))
                             lhs = WM._calc_head_loss_oa(qp, y, qp_sol, exponent)
                             con = JuMP.@build_constraint(r * lhs <= dhp / pipe["length"])
-                            WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                            WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
                         end
                     else
                         qn = WM.var(wm, nw, :qn_pipe, a)
@@ -69,7 +69,7 @@ function get_owf_user_cut_callback(wm::WM.AbstractWaterModel, callback_stats)
                             push!(qn_pipe_vals[nw][a], max(0.0, qn_sol))
                             lhs = WM._calc_head_loss_oa(qn, 1.0 - y, qn_sol, exponent)
                             con = JuMP.@build_constraint(r * lhs <= dhn / pipe["length"])
-                            WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                            WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
                         end
                     end
                 end
@@ -101,7 +101,7 @@ function get_owf_user_cut_callback(wm::WM.AbstractWaterModel, callback_stats)
                         if abs(g_sol - g_pred) > 1.0e-4 && qp_diff > 1.0e-4
                             push!(qp_pump_vals[nw][a], max(0.0, qp_sol))
                             con = JuMP.@build_constraint(g <= g_pred * z + df_pred * (qp - qp_sol * z))
-                            WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                            WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
                         end
                     end
                 end
@@ -160,11 +160,11 @@ function get_owf_user_cut_callback(wm::AbstractPWLRDXModel)
 
                         lhs = WM._calc_head_loss_oa(qp, y, qp_sol, exponent)
                         con = JuMP.@build_constraint(r * lhs <= dhp / pipe["length"])
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
 
                         lhs = _calc_pipe_flow_integrated_oa(qp, y, qp_sol, exponent)
                         con = JuMP.@build_constraint(r * lhs <= qp_nl / pipe["length"])
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
                     end
 
                     dhp_nl = WM.var(wm, nw, :dhp_nl_pipe, a)
@@ -181,7 +181,7 @@ function get_owf_user_cut_callback(wm::AbstractPWLRDXModel)
                         push!(dhp_pipe_vals[nw][a], max(0.0, dhp_sol))
                         lhs = _calc_pipe_head_integrated_oa(dhp, y, dhp_sol, exponent)
                         con = JuMP.@build_constraint(r_r * lhs <= dhp_nl / L_r)
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
                     end
                 else
                     qn = WM.var(wm, nw, :qn_pipe, a)
@@ -209,11 +209,11 @@ function get_owf_user_cut_callback(wm::AbstractPWLRDXModel)
 
                         lhs = WM._calc_head_loss_oa(qn, 1.0 - y, qn_sol, exponent)
                         con = JuMP.@build_constraint(r * lhs <= dhn / pipe["length"])
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
 
                         lhs = _calc_pipe_flow_integrated_oa(qn, 1.0 - y, qn_sol, exponent)
                         con = JuMP.@build_constraint(r * lhs <= qn_nl / pipe["length"])
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
                     end
 
                     dhn_nl = WM.var(wm, nw, :dhn_nl_pipe, a)
@@ -230,7 +230,7 @@ function get_owf_user_cut_callback(wm::AbstractPWLRDXModel)
                         push!(dhn_pipe_vals[nw][a], max(0.0, dhn_sol))
                         lhs = _calc_pipe_head_integrated_oa(dhn, 1.0 - y, dhn_sol, exponent)
                         con = JuMP.@build_constraint(r_r * lhs <= dhn_nl / L_r)
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
                     end
                 end
             end
@@ -272,11 +272,11 @@ function get_owf_user_cut_callback(wm::AbstractPWLRDXModel)
                         push!(qp_pump_vals[nw][a], max(0.0, qp_sol))
 
                         con = JuMP.@build_constraint(g <= g_pred * z + df_pred * (qp - qp_sol * z))
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
 
                         rhs = _calc_pump_flow_integrated_oa(qp, z, qp_sol, c)
                         con = JuMP.@build_constraint(qp_nl <= rhs)
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
                     end
 
                     g_nl = WM.var(wm, nw, :g_nl_pump, a)
@@ -298,7 +298,7 @@ function get_owf_user_cut_callback(wm::AbstractPWLRDXModel)
                         push!(g_pump_vals[nw][a], max(0.0, g_sol))
                         lhs = _calc_pump_gain_integrated_oa(g, z, g_sol, c)
                         con = JuMP.@build_constraint(lhs <= g_nl)
-                        WM._MOI.submit(wm.model, WM._MOI.UserCut(cb_data), con)
+                        WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.UserCut(cb_data), con)
                     end
                 end
             end
@@ -310,6 +310,6 @@ end
 function add_owf_user_cut_callback!(wm::WM.AbstractWaterModel)
     callback_stats = CallbackStats(0.0, 0)
     callback_function = get_owf_user_cut_callback(wm, callback_stats)
-    WM._MOI.set(wm.model, WM._MOI.UserCutCallback(), callback_function)
+    WM.JuMP.MOI.set(wm.model, WM.JuMP.MOI.UserCutCallback(), callback_function)
     return callback_stats
 end

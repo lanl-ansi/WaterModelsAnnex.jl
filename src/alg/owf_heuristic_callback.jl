@@ -42,7 +42,7 @@ function submit_heuristic_solution_from_setting!(wm, cb_data, network, setting, 
         update_tank_time_series(wm_sim.data, result, nw)
     end
 
-    accepted = WM._MOI.submit(wm.model, MOI.HeuristicSolution(cb_data), vars, vals)
+    accepted = WM.JuMP.MOI.submit(wm.model, MOI.HeuristicSolution(cb_data), vars, vals)
     println(total_cost, " ", accepted)
 end
 
@@ -73,5 +73,5 @@ end
 
 function add_owf_heuristic_callback!(wm::WM.AbstractWaterModel, network, nlp_optimizer, mip_optimizer)
     callback_function = get_owf_heuristic_callback(wm, network, nlp_optimizer, mip_optimizer)
-    WM._MOI.set(wm.model, WM._MOI.HeuristicCallback(), callback_function)
+    WM.JuMP.MOI.set(wm.model, WM.JuMP.MOI.HeuristicCallback(), callback_function)
 end

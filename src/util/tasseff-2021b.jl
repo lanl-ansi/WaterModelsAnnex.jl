@@ -61,10 +61,10 @@ function solve_owf_upper_bounds(network_mn::Dict, network::Dict, cuts_path::Stri
  
     # Set the optimizer and other important solver parameters.
     WM.JuMP.set_optimizer(wm.model, mip_optimizer)
-    #WM._MOI.set(wm.model, WM._MOI.NumberOfThreads(), 1)
+    # WM.JuMP.MOI.set(wm.model, WM.JuMP.MOI.NumberOfThreads(), 1)
 
     # TODO: Remove this once Gurobi.jl interface is fixed.
-    #wm.model.moi_backend.optimizer.model.has_generic_callback = false
+    # wm.model.moi_backend.optimizer.model.has_generic_callback = false
 
     # Add the lazy cut callback.
     lazy_cut_stats = add_owf_lazy_cut_callback!(wm, network, nlp_optimizer)    

@@ -14,11 +14,11 @@ function _get_bound_problems_tank_group(wm::WM.AbstractWaterModel, i::Int, nw::I
         V_sum_vid = WM._VariableIndex(nw, :tank_group, :V_sum, i)
 
         V_sum_min = WM._get_lower_bound_from_index(wm, V_sum_vid)
-        bp_V_sum_min = WM.BoundProblem(WM._MOI.MIN_SENSE, V_sum_vid, [],
+        bp_V_sum_min = WM.BoundProblem(WM.JuMP.MOI.MIN_SENSE, V_sum_vid, [],
             [], "V_sum_min", V_sum_min, 1.0e-3, true)
 
         V_sum_max = WM._get_upper_bound_from_index(wm, V_sum_vid)
-        bp_V_sum_max = WM.BoundProblem(WM._MOI.MAX_SENSE, V_sum_vid, [],
+        bp_V_sum_max = WM.BoundProblem(WM.JuMP.MOI.MAX_SENSE, V_sum_vid, [],
             [], "V_sum_max", V_sum_max, 1.0e-3, true)
 
         if limit

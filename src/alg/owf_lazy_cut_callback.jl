@@ -82,7 +82,7 @@ end
 
 
 function simulate_from_data(data::Dict{String, <:Any}, optimizer)
-    result = Dict{String, Any}("primal_status" => WM._MOI.INFEASIBLE_POINT)
+    result = Dict{String, Any}("primal_status" => WM.JuMP.MOI.INFEASIBLE_POINT)
     cost, first_infeasible_nw, recovered = 0.0, nothing, true
 
     for n in 1:data["time_series"]["num_steps"] - 1
@@ -93,14 +93,14 @@ function simulate_from_data(data::Dict{String, <:Any}, optimizer)
             optimizer; relax_integrality = true)
 
         if !feasible_simulation_result(result)
-            result["primal_status"] = WM._MOI.INFEASIBLE_POINT
+            result["primal_status"] = WM.JuMP.MOI.INFEASIBLE_POINT
             result["objective"] = Inf
             first_infeasible_nw = n; cost = 0.0; break;
         elseif haskey(result["solution"], "pump")
             cost += sum(x["c"] for (i, x) in result["solution"]["pump"])
         end
 
-        result["primal_status"] = WM._MOI.FEASIBLE_POINT
+        result["primal_status"] = WM.JuMP.MOI.FEASIBLE_POINT
         result["objective"] = 0.0
 
         _update_initial_tank_heads!(data, result, n + 1)
@@ -111,11 +111,11 @@ function simulate_from_data(data::Dict{String, <:Any}, optimizer)
 
         if !tank_recovery_satisfied(data, result)
             first_infeasible_nw = data["time_series"]["num_steps"] - 1
-            result["primal_status"] = WM._MOI.INFEASIBLE_POINT
+            result["primal_status"] = WM.JuMP.MOI.INFEASIBLE_POINT
             result["objective"] = Inf
             recovered = false
         else
-            result["primal_status"] = WM._MOI.FEASIBLE_POINT
+            result["primal_status"] = WM.JuMP.MOI.FEASIBLE_POINT
             result["objective"] = 0.0
         end
     end
@@ -184,8 +184,8 @@ end
 
 
 function feasible_simulation_result(result::Dict{String, <:Any})
-    #feasible_statuses = [WM._MOI.FEASIBLE_POINT, WM._MOI.NEARLY_FEASIBLE_POINT]
-    status_is_feasible = result["primal_status"] === WM._MOI.FEASIBLE_POINT
+    #feasible_statuses = [WM.JuMP.MOI.FEASIBLE_POINT, WM.JuMP.MOI.NEARLY_FEASIBLE_POINT]
+    status_is_feasible = result["primal_status"] === WM.JuMP.MOI.FEASIBLE_POINT
     objective_is_small = result["objective"] <= 1.0e-6
     return status_is_feasible && objective_is_small
 end
@@ -196,10 +196,11 @@ function add_feasibility_cut!(wm::WM.AbstractWaterModel, cb_data, nw_last::Int)
     vars = _get_indicator_variables_to_nw(wm, nw_last)
     zero_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) < 0.5, vars)
     one_vars = filter(x -> round(WM.JuMP.callback_value(cb_data, x)) >= 0.5, vars)
+    @assert length(zero_vars) + length(one_vars) == length(vars)
 
     # If the solution is not feasible (according to a comparison with WNTR), add a no-good cut.
     con = WM.JuMP.@build_constraint(sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
-    WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
+    WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.LazyConstraint(cb_data), con)
 end
 
 
@@ -210,7 +211,7 @@ function add_recovery_feasibility_cut!(wm::WM.AbstractWaterModel, cb_data)
 
     # If the solution is not feasible (according to a comparison with simulation), add a no-good cut.
     con = WM.JuMP.@build_constraint(sum(zero_vars) >= 1)
-    WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
+    WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.LazyConstraint(cb_data), con)
 end
 
 
@@ -226,7 +227,7 @@ function add_objective_cut!(wm::WM.AbstractWaterModel, cb_data, objective_value:
     # Add a cut to raise the objective for the solution to the true objective.
     bin_expr = objective_value * (sum(one_vars) - length(one_vars) + sum(zero_vars))
     con = WM.JuMP.@build_constraint(obj_func >= objective_value - bin_expr)
-    WM._MOI.submit(wm.model, WM._MOI.LazyConstraint(cb_data), con)
+    WM.JuMP.MOI.submit(wm.model, WM.JuMP.MOI.LazyConstraint(cb_data), con)
 end
 
 
@@ -413,12 +414,10 @@ function get_owf_lazy_cut_callback(wm::WM.AbstractWaterModel, network, optimizer
             id_infeasible = findfirst(x -> !x.feasible, simulation_results)
             nw_infeasible = network_ids[id_infeasible]
             stats.time_elapsed += @elapsed add_feasibility_cut!(wm, cb_data, nw_infeasible)
-            # WM.Memento.info(LOGGER, "Infeasible solution found at step $(nw_infeasible).")
         else
             cost = sum(x.cost for x in simulation_results)
             WM.Memento.info(LOGGER, "Found feasible solution with cost $(cost).")
             stats.best_cost = cost < stats.best_cost ? cost : stats.best_cost
-            # stats.time_elapsed += @elapsed add_objective_cut!(wm, cb_data, cost)
         end
 
         stats.num_calls += 1
@@ -436,6 +435,6 @@ end
 function add_owf_lazy_cut_callback!(wm::WM.AbstractWaterModel, network, optimizer)
     callback_stats = CallbackStats(0.0, 0, Inf)
     callback_function = get_owf_lazy_cut_callback(wm, network, optimizer, callback_stats)
-    WM._MOI.set(wm.model, WM._MOI.LazyConstraintCallback(), callback_function)
+    WM.JuMP.MOI.set(wm.model, WM.JuMP.MOI.LazyConstraintCallback(), callback_function)
     return callback_stats
 end

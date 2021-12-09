@@ -63,7 +63,16 @@ function WM.constraint_flow_conservation(
         sum(qp_pipe[a] - qn_pipe[a] for a in pipe_to) -
         q_pump_fr + q_pump_to - q_regulator_fr + q_regulator_to - q_valve_fr + q_valve_to -
         sum(qp_short_pipe[a] - qn_short_pipe[a] for a in short_pipe_fr) +
-        sum(qp_short_pipe[a] - qn_short_pipe[a] for a in short_pipe_to) == -
+        sum(qp_short_pipe[a] - qn_short_pipe[a] for a in short_pipe_to) <= -
+        sum(q_reservoir[k] for k in reservoirs) - sum(q_tank[k] for k in tanks) +
+        sum(q_demand[k] for k in dispatchable_demands) + fixed_demand_val)
+
+    WM.con(wm, n, :flow_conservation)[i] = JuMP.@NLconstraint(wm.model, -
+        sum(qp_pipe[a] - qn_pipe[a] for a in pipe_fr) +
+        sum(qp_pipe[a] - qn_pipe[a] for a in pipe_to) -
+        q_pump_fr + q_pump_to - q_regulator_fr + q_regulator_to - q_valve_fr + q_valve_to -
+        sum(qp_short_pipe[a] - qn_short_pipe[a] for a in short_pipe_fr) +
+        sum(qp_short_pipe[a] - qn_short_pipe[a] for a in short_pipe_to) >= -
         sum(q_reservoir[k] for k in reservoirs) - sum(q_tank[k] for k in tanks) +
         sum(q_demand[k] for k in dispatchable_demands) + fixed_demand_val)
 end
@@ -181,7 +190,6 @@ function objective_strong_duality(wm::AbstractCQModel)
     base_length = get(wm_data, "base_length", 1.0)
     base_mass = get(wm_data, "base_mass", 1.0)
     base_time = get(wm_data, "base_time", 1.0)
-    alpha = WM._get_alpha_min_1(wm) + 1.0
     
     pipe_type = wm.ref[:it][WM.wm_it_sym][:head_loss]
     viscosity = wm.ref[:it][WM.wm_it_sym][:viscosity]
@@ -190,45 +198,40 @@ function objective_strong_duality(wm::AbstractCQModel)
     h_tank = wm.model[:h_tank]
     h_reservoir = wm.model[:h_reservoir]
     z_pump = wm.model[:z_pump]
-    z_regulator = wm.model[:z_regulator]
-    z_valve = wm.model[:z_valve]
 
     f_1 = Array{Any, 1}([0.0])
     f_2 = Array{Any, 1}([0.0])
 
-    for (n, network) in WM.nws(wm)
+    for n in WM.nw_ids(wm)
         # Get pipe flow variables.
         qp_pipe = WM.var(wm, n, :qp_pipe)
         qn_pipe = WM.var(wm, n, :qn_pipe)
-
-        # Get design pipe flow variables.
-        qp_des_pipe = WM.var(wm, n, :qp_des_pipe)
-        qn_des_pipe = WM.var(wm, n, :qn_des_pipe)
-
-        # Get valve flow variables.
-        qp_valve = WM.var(wm, n, :qp_valve)
-        qn_valve = WM.var(wm, n, :qn_valve)
-
-        # Get pump flow and head difference variables.
-        q_tank = WM.var(wm, n, :q_tank)
-        q_reservoir = WM.var(wm, n, :q_reservoir)
-        qp_pump = WM.var(wm, n, :qp_pump)
         
         for (a, pipe) in WM.ref(wm, n, :pipe)
             L_x_r = pipe["length"] * WM._calc_pipe_resistance(
                 pipe, pipe_type, viscosity, base_length, base_mass, base_time)
             
-            push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qp_pipe[a])))
-            push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qn_pipe[a])))
+            push!(f_1, JuMP.@NLexpression(
+                wm.model, L_x_r * head_loss(qp_pipe[a])))
+            push!(f_1, JuMP.@NLexpression(
+                wm.model, L_x_r * head_loss(qn_pipe[a])))
         end
+
+        # Get design pipe flow variables.
+        qp_des_pipe = WM.var(wm, n, :qp_des_pipe)
+        qn_des_pipe = WM.var(wm, n, :qn_des_pipe)
 
         for (a, des_pipe) in WM.ref(wm, n, :des_pipe)
             L_x_r = des_pipe["length"] * WM._calc_pipe_resistance(
                 des_pipe, pipe_type, viscosity, base_length, base_time)
             
-            push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qp_des_pipe[a])))
-            push!(f_1, JuMP.@NLexpression(wm.model, L_x_r * head_loss(qn_des_pipe[a])))
+            push!(f_1, JuMP.@NLexpression(
+                wm.model, L_x_r * head_loss(qp_des_pipe[a])))
+            push!(f_1, JuMP.@NLexpression(
+                wm.model, L_x_r * head_loss(qn_des_pipe[a])))
         end
+
+        qp_pump = WM.var(wm, n, :qp_pump)
         
         for (a, pump) in WM.ref(wm, n, :pump)
             @assert pump["pump_type"] in [WM.PUMP_QUADRATIC,
@@ -248,13 +251,17 @@ function objective_strong_duality(wm::AbstractCQModel)
                     z_pump[a] * c[1] * qp_pump[a] +
                     z_pump[a] * (1.0 / (1.0 + c[3])) *
                     c[2] * qp_pump[a]^(c[3] + 1.0)))
-            end 
+            end
         end
+
+        q_tank = WM.var(wm, n, :q_tank)
 
         for (i, tank) in WM.ref(wm, n, :tank)
            push!(f_2, JuMP.@NLexpression(wm.model,
                q_tank[i] * h_tank[tank["node"]]))
         end
+
+        q_reservoir = WM.var(wm, n, :q_reservoir)
 
         for (i, reservoir) in WM.ref(wm, n, :reservoir)
             push!(f_2, JuMP.@NLexpression(wm.model,
@@ -262,7 +269,7 @@ function objective_strong_duality(wm::AbstractCQModel)
         end
     end
 
-    JuMP.@NLobjective(wm.model, WM._MOI.MIN_SENSE,
+    JuMP.@NLobjective(wm.model, WM.JuMP.MOI.MIN_SENSE,
         sum(f_1[k] for k in 1:length(f_1)) -
         sum(f_2[k] for k in 1:length(f_2)))
 end

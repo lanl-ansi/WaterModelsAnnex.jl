@@ -129,7 +129,7 @@ function heuristic_master_program_objective!(model, z, Beta)
         sum([z[n][i] for n in network_indices]))^2 for i in 1:length(z[1])])
     obj_var = JuMP.@variable(model, lower_bound = 0.0)
     JuMP.@constraint(model, obj_var >= cost_1 + cost_2)
-    return JuMP.@objective(model, WM._MOI.MIN_SENSE, obj_var)
+    return JuMP.@objective(model, WM.JuMP.MOI.MIN_SENSE, obj_var)
 end
 
 
@@ -141,7 +141,7 @@ end
 
 function add_master_program_lazy_callback!(network, model::JuMP.Model, z, settings, nlp_optimizer)
     callback = get_master_program_lazy_callback(network, model, z, settings, nlp_optimizer)
-    WM._MOI.set(model, WM._MOI.LazyConstraintCallback(), callback)
+    WM.JuMP.MOI.set(model, WM.JuMP.MOI.LazyConstraintCallback(), callback)
 end
 
 
@@ -232,7 +232,7 @@ function get_master_program_lazy_callback(network, model::JuMP.Model, z, setting
         
             # If the solution is not feasible (according to a simulation comparison), add a no-good cut.
             con = WM.JuMP.@build_constraint(sum(zero_vars) - sum(one_vars) >= 1.0 - length(one_vars))
-            WM._MOI.submit(model, WM._MOI.LazyConstraint(cb_data), con)
+            WM.JuMP.MOI.submit(model, WM.JuMP.MOI.LazyConstraint(cb_data), con)
         end
     end
 end
@@ -254,7 +254,7 @@ function solve_heuristic_master_program(wm, network, settings, weights, optimize
 
     while num_iterations <= max_iterations
         JuMP.optimize!(model)
-        JuMP.primal_status(model) == WM._MOI.FEASIBLE_POINT && break
+        JuMP.primal_status(model) == WM.JuMP.MOI.FEASIBLE_POINT && break
         WM.Memento.info(LOGGER, "Reattempting heuristic solution discovery.")
 
         model = JuMP.Model(optimizer)
@@ -271,7 +271,7 @@ function solve_heuristic_master_program(wm, network, settings, weights, optimize
         num_iterations += 1
     end
 
-    if JuMP.primal_status(model) == WM._MOI.FEASIBLE_POINT
+    if JuMP.primal_status(model) == WM.JuMP.MOI.FEASIBLE_POINT
         return Dict{Int, Any}(n => JuMP.value.(z[n]) for n in keys(z))
     else
         return nothing

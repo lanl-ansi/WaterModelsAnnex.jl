@@ -271,7 +271,7 @@ function constraint_strong_duality(wm::AbstractCDModel)
         end
     end
 
-    JuMP.@NLobjective(wm.model, WM._MOI.MIN_SENSE,
+    JuMP.@NLobjective(wm.model, WM.JuMP.MOI.MIN_SENSE,
         sum(f_1[k] for k in 1:length(f_1)) -
         sum(f_2[k] for k in 1:length(f_2)) +
         sum(f_3[k] for k in 1:length(f_3)) +

@@ -20,9 +20,9 @@ function run_pwlrd_heuristic(network_mn::Dict{String, <:Any}, optimizer, time_li
     nw_ids = sort(collect(WM.nw_ids(wm)))[1:end-1]
     z_sum = sum(sum(WM.var(wm, nw, :z_pump)) for nw in nw_ids)
 
-    JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, z_sum)
+    JuMP.@objective(wm.model, WM.JuMP.MOI.MIN_SENSE, z_sum)
     result_relaxed_min = WM.optimize_model!(wm)
-    JuMP.@objective(wm.model, WM._MOI.MAX_SENSE, z_sum)
+    JuMP.@objective(wm.model, WM.JuMP.MOI.MAX_SENSE, z_sum)
     result_relaxed_max = WM.optimize_model!(wm)
     undo_relax() # Undo all continuous relaxations.
 
@@ -80,7 +80,7 @@ function run_nc_heuristic(network_mn::Dict{String, <:Any}, mip_optimizer, nlp_op
     # z_sum = sum(sum(WM.var(wm_nlp, nw, :z_pump)) for nw in nw_ids)
 
     while !found_solution && num_iterations < 15
-        # JuMP.@objective(wm_nlp.model, WM._MOI.MIN_SENSE, z_sum)
+        # JuMP.@objective(wm_nlp.model, WM.JuMP.MOI.MIN_SENSE, z_sum)
         result_relaxed = WM.optimize_model!(wm_nlp)
         println(JuMP.termination_status(wm_nlp.model))
 
@@ -111,7 +111,7 @@ function run_nc_heuristic(network_mn::Dict{String, <:Any}, mip_optimizer, nlp_op
     #     sol_max = result_relaxed_max["solution"]["nw"][string(nw)]
 
 
-    # JuMP.@objective(wm_nlp.model, WM._MOI.MAX_SENSE, z_sum)
+    # JuMP.@objective(wm_nlp.model, WM.JuMP.MOI.MAX_SENSE, z_sum)
     # result_relaxed_max = WM.optimize_model!(wm_nlp)
 
     # for nw in nw_ids

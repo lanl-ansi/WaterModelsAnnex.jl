@@ -28,18 +28,18 @@ end
 # `using WaterModelsAnnex`
 
 # so that users do not need to import JuMP to use a solver with WaterModelsAnnex
-import JuMP: optimizer_with_attributes
+import WaterModels.JuMP: optimizer_with_attributes
 export optimizer_with_attributes
 
-import MathOptInterface: TerminationStatusCode
+import WaterModels.JuMP: TerminationStatusCode
 export TerminationStatusCode
 
-import MathOptInterface: ResultStatusCode
+import WaterModels.JuMP: ResultStatusCode
 export ResultStatusCode
 
 for status_code_enum in [TerminationStatusCode, ResultStatusCode]
     for status_code in instances(status_code_enum)
-        @eval import MathOptInterface: $(Symbol(status_code))
+        @eval import WaterModels.JuMP: $(Symbol(status_code))
         @eval export $(Symbol(status_code))
     end
 end

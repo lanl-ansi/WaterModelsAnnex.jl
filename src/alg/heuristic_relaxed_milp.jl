@@ -68,7 +68,7 @@ function feasibility_pump(wm::WM.AbstractWaterModel)
      end
 
     #  JuMP.@constraint(wm.model, objective <= 3.0)
-     JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
+     JuMP.@objective(wm.model, WM.JuMP.MOI.MIN_SENSE, objective)
      return WM.optimize_model!(wm)
 end
 
@@ -87,7 +87,7 @@ function feasibility_pump_at_nw(wm::WM.AbstractWaterModel, nws_fixed::Vector{Int
 
     JuMP.optimize!(wm.model) # Solve the relaxed model.
 
-    if JuMP.primal_status(wm.model) === WM._MOI.FEASIBLE_POINT
+    if JuMP.primal_status(wm.model) === WM.JuMP.MOI.FEASIBLE_POINT
         vars_to_fix_nx = filter(v -> !occursin("_x", JuMP.name(v)), vars_discrete)
         # vars_to_fix_nxy = filter(v -> !occursin("_y", JuMP.name(v)), vars_to_fix_nx)
         JuMP.fix.(vars_to_fix_nx, round.(JuMP.value.(vars_to_fix_nx)))
@@ -136,11 +136,11 @@ function run_feasibility_pump(network_mn::Dict{String, Any}, mip_solver)
     map(v -> !JuMP.is_binary(v) && JuMP.set_binary(v), vars_to_unfix)
     result = WM.optimize_model!(wm)
 
-    # if result["primal_status"] !== WM._MOI.FEASIBLE_POINT
+    # if result["primal_status"] !== WM.JuMP.MOI.FEASIBLE_POINT
     #     result = feasibility_pump(wm)
     # end
 
-    feasible = result["primal_status"] === WM._MOI.FEASIBLE_POINT
+    feasible = result["primal_status"] === WM.JuMP.MOI.FEASIBLE_POINT
     return feasible ? result : nothing
 end
 
@@ -205,7 +205,7 @@ function objective_mean_tank_levels(wm::WM.AbstractWaterModel, nws::Vector{Int})
         end
     end
 
-    JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
+    JuMP.@objective(wm.model, WM.JuMP.MOI.MIN_SENSE, objective)
 end
 
 
@@ -273,7 +273,7 @@ function objective_predicted_tank_levels(wm::WM.AbstractWaterModel, simulation_r
         end
     end
 
-    JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
+    JuMP.@objective(wm.model, WM.JuMP.MOI.MIN_SENSE, objective)
 end
 
 
@@ -300,7 +300,7 @@ function objective_min_losses(wm::WM.AbstractWaterModel, nws::Vector{Int})
         # end
     end
 
-    JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
+    JuMP.@objective(wm.model, WM.JuMP.MOI.MIN_SENSE, objective)
 end
 
 
@@ -358,7 +358,7 @@ function feasibility_pump_set_objective!(wm::WM.AbstractWaterModel, control_sett
         end
     end
 
-    JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
+    JuMP.@objective(wm.model, WM.JuMP.MOI.MIN_SENSE, objective)
 end
 
 
@@ -413,7 +413,7 @@ function run_sequential_heuristic(
             objective_mean_tank_levels(wm, sort(collect(WM.nw_ids(wm))))
             time_elapsed += @elapsed result = solve_pseudo_relaxation_nw(wm, nw_random)
 
-            if result["primal_status"] === WM._MOI.FEASIBLE_POINT
+            if result["primal_status"] === WM.JuMP.MOI.FEASIBLE_POINT
                 control_settings = get_control_settings_from_result(result)
                 map(x -> x.vals = abs.(round.(x.vals)), control_settings)
                 num_look_back = 2
@@ -466,7 +466,7 @@ end
 #         # end
 #     end
 
-#     JuMP.@objective(wm.model, WM._MOI.MIN_SENSE, objective)
+#     JuMP.@objective(wm.model, WM.JuMP.MOI.MIN_SENSE, objective)
 # end
 
 
