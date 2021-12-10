@@ -151,10 +151,10 @@ function check_solution(wm::AbstractCQModel, rhs::Vector{Float64}, heads::Vector
         if arc.type in [:des_pipe, :pump, :valve, :regulator]
             z = JuMP.value(wm.model[Symbol("z_" * string(arc.type))][arc.index])
             head_difference = round(z) * (heads[col_fr] - heads[col_to])
-            @assert isapprox(rhs[arc_index], head_difference; atol = 1.0e-6)
+            @assert isapprox(rhs[arc_index], head_difference; atol = 1.0e-4)
         else
             head_difference = heads[col_fr] - heads[col_to]
-            @assert isapprox(rhs[arc_index], head_difference; atol = 1.0e-6)
+            @assert isapprox(rhs[arc_index], head_difference; atol = 1.0e-4)
         end
     end
     
